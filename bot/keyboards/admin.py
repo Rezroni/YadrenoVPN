@@ -129,24 +129,13 @@ def stop_bot_confirm_kb() -> InlineKeyboardMarkup:
 # НАСТРОЙКИ БОТА
 # ============================================================================
 
-def bot_settings_kb(has_updates: bool = False) -> InlineKeyboardMarkup:
+def bot_settings_kb() -> InlineKeyboardMarkup:
     """
     Клавиатура раздела 'Настройки бота'.
-    
-    Args:
-        has_updates: Есть ли доступные обновления
     """
     builder = InlineKeyboardBuilder()
     
-    # Проверка обновлений
-    update_text = "🔍 Проверить обновления"
-    if has_updates:
-        update_text = "📦 Есть обновления!"
-    builder.row(
-        InlineKeyboardButton(text=update_text, callback_data="admin_check_updates")
-    )
-    
-    # Обновить бота
+    # Обновить бота (проверка происходит при нажатии)
     builder.row(
         InlineKeyboardButton(text="🔄 Обновить бота", callback_data="admin_update_bot")
     )
@@ -167,31 +156,7 @@ def bot_settings_kb(has_updates: bool = False) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def update_check_result_kb(has_updates: bool) -> InlineKeyboardMarkup:
-    """
-    Клавиатура результата проверки обновлений.
-    
-    Args:
-        has_updates: Есть ли доступные обновления
-    """
-    builder = InlineKeyboardBuilder()
-    
-    if has_updates:
-        builder.row(
-            InlineKeyboardButton(
-                text="🔄 Обновить и перезапустить",
-                callback_data="admin_update_bot_confirm"
-            )
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="🔍 Проверить снова", callback_data="admin_check_updates")
-    )
-    
-    # Навигация
-    builder.row(back_button("admin_bot_settings"), home_button())
-    
-    return builder.as_markup()
+
 
 
 def update_confirm_kb(has_updates: bool = True) -> InlineKeyboardMarkup:

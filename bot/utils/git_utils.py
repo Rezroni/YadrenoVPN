@@ -40,6 +40,7 @@ def run_git_command(args: List[str], timeout: int = 30) -> Tuple[bool, str]:
             cwd=get_project_root(),
             capture_output=True,
             text=True,
+            encoding='utf-8',
             timeout=timeout
         )
         output = result.stdout + result.stderr
@@ -190,23 +191,24 @@ def pull_updates() -> Tuple[bool, str]:
     return True, f"✅ Обновление успешно!\n\n{output}"
 
 
-def get_recent_commits(limit: int = 5) -> str:
-    """
-    Получает последние коммиты.
-    
-    Args:
-        limit: Количество коммитов
-    
-    Returns:
-        Форматированный список коммитов
-    """
+def get_last_commit_info() -> str:
+    """Получает информацию о последнем коммите."""
     success, output = run_git_command([
-        'log', '--format=%h %B', '-n', str(limit)
+        'log', '--format=%h %B', '-n', '1'
     ])
-    
     if success and output:
         return output
-    return "Не удалось получить историю коммитов"
+    return "Не удалось получить информацию о последнем коммите"
+
+
+def get_previous_commits_info(limit: int = 5) -> str:
+    """Получает предыдущие коммиты, пропуская последний."""
+    success, output = run_git_command([
+        'log', '--format=%h %B', '--skip=1', '-n', str(limit)
+    ])
+    if success and output:
+        return output
+    return "Нет предыдущих коммитов"
 
 
 def restart_bot() -> None:

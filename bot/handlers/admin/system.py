@@ -21,12 +21,12 @@ from bot.utils.git_utils import (
     set_remote_url,
     check_for_updates,
     pull_updates,
-    get_recent_commits,
+    get_last_commit_info,
+    get_previous_commits_info,
     restart_bot,
 )
 from bot.keyboards.admin import (
     bot_settings_kb,
-    update_check_result_kb,
     update_confirm_kb,
     stop_bot_confirm_kb,
     back_and_home_kb,
@@ -71,82 +71,6 @@ async def show_bot_settings(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-
-# ============================================================================
-# ПРОВЕРКА ОБНОВЛЕНИЙ
-# ============================================================================
-
-@router.callback_query(F.data == "admin_check_updates")
-async def check_updates_handler(callback: CallbackQuery, state: FSMContext):
-    """Проверяет наличие обновлений на GitHub."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещён", show_alert=True)
-        return
-    
-    # Проверяем наличие git
-    if not check_git_available():
-        await callback.message.edit_text(
-            "❌ *Ошибка*\n\n"
-            "Git не установлен или не найден в PATH.\n"
-            "Установите Git для использования автообновления.",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-        return
-    
-    # Проверяем настроен ли GitHub URL
-    if not GITHUB_REPO_URL:
-        await callback.message.edit_text(
-            "❌ *GitHub не настроен*\n\n"
-            "Укажите URL репозитория в файле `config.py`:\n"
-            "`GITHUB_REPO_URL = \"https://github.com/user/repo.git\"`",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-        return
-    
-    # Проверяем и обновляем remote URL если нужно
-    current_remote = get_remote_url()
-    if current_remote != GITHUB_REPO_URL:
-        success, msg = set_remote_url(GITHUB_REPO_URL)
-        if not success:
-            await callback.message.edit_text(
-                f"❌ *Ошибка настройки remote*\n\n{msg}",
-                reply_markup=back_and_home_kb("admin_bot_settings"),
-                parse_mode="Markdown"
-            )
-            await callback.answer()
-            return
-    
-    # Показываем сообщение о проверке
-    await callback.message.edit_text(
-        "🔍 *Проверка обновлений...*\n\n"
-        "Подключаюсь к GitHub...",
-        parse_mode="Markdown"
-    )
-    
-    # Проверяем обновления
-    success, commits_behind, log_text = check_for_updates()
-    
-    if not success:
-        await callback.message.edit_text(
-            f"❌ *Ошибка проверки*\n\n{log_text}",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-        return
-    
-    has_updates = commits_behind > 0
-    
-    await callback.message.edit_text(
-        f"🔍 *Результат проверки*\n\n{log_text}",
-        reply_markup=update_check_result_kb(has_updates),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
 
 
 # ============================================================================
@@ -196,24 +120,30 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     
-    commit = get_current_commit() or "неизвестно"
-    recent = get_recent_commits(3)
+    commit_hash = get_current_commit() or "неизвестно"
+    last_commit = get_last_commit_info()
+    previous_commits = get_previous_commits_info(5)
+    
+    # Формируем текст с коммитами
+    commits_text = f"🔹 *Последний коммит:*\n```\n{last_commit}\n```\n"
+    if previous_commits != "Нет предыдущих коммитов":
+         commits_text += f"\n🔸 *Предыдущие 5 коммитов:*\n```\n{previous_commits}\n```"
     
     # Если обновлений нет
     if commits_behind == 0:
         await callback.message.edit_text(
             "✅ *Обновление не требуется, у вас последняя версия*\n\n"
-            f"Текущая версия: `{commit}`\n\n"
-            f"Последние коммиты:\n```\n{recent}\n```",
+            f"Текущая версия: `{commit_hash}`\n\n"
+            f"{commits_text}",
             reply_markup=update_confirm_kb(has_updates=False),
             parse_mode="Markdown"
         )
     else:
         # Есть обновления
         await callback.message.edit_text(
-            "🔄 *Обновление бота*\n\n"
-            f"Текущая версия: `{commit}`\n\n"
-            f"Последние коммиты:\n```\n{recent}\n```\n\n"
+            f"📦 *Доступно обновлений:* {commits_behind}\n\n"
+            f"Текущая версия: `{commit_hash}`\n\n"
+            f"{commits_text}\n\n"
             "⚠️ После обновления бот автоматически перезапустится.\n"
             "Это займёт несколько секунд.",
             reply_markup=update_confirm_kb(has_updates=True),
