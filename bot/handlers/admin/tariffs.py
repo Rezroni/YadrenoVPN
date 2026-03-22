@@ -348,8 +348,10 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
     if current_step > total:
         return
     
+    from bot.utils.text import get_message_text_for_storage
+    
     param = params[current_step - 1]
-    value = message.text.strip()
+    value = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     if not param['validate'](value):
@@ -620,8 +622,10 @@ async def edit_tariff_value(message: Message, state: FSMContext):
     include_crypto = data.get('include_crypto', False)
     crypto_mode = data.get('crypto_mode', 'standard')
     
+    from bot.utils.text import get_message_text_for_storage
+    
     param = get_tariff_param_by_index(current_param, include_crypto, crypto_mode)
-    value = message.text.strip()
+    value = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     if not param['validate'](value):

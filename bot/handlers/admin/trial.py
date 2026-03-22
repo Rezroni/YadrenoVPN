@@ -47,19 +47,19 @@ async def show_trial_menu(callback: CallbackQuery):
 
     text = (
         "🎁 *Пробная подписка*\n\n"
-        "Управление функцией пробного доступа для новых пользователей\\.\n\n"
+        "Управление функцией пробного доступа для новых пользователей.\n\n"
         f"📌 *Статус:* {escape_md(status_text)}\n"
         f"📋 *Тариф:* {tariff_text}\n\n"
         "❓ *Как работает:*\n"
-        "• Если включено и тариф задан — кнопка «🎁 Пробная подписка» появляется на главной у пользователей, которые ещё не использовали пробный период\\.\n"
-        "• При активации — пользователю выдаётся ключ с выбранным тарифом\\.\n"
-        "• Каждый пользователь может активировать пробный период только один раз\\."
+        "• Если включено и тариф задан — кнопка «🎁 Пробная подписка» появляется на главной у пользователей, которые ещё не использовали пробный период.\n"
+        "• При активации — пользователю выдаётся ключ с выбранным тарифом.\n"
+        "• Каждый пользователь может активировать пробный период только один раз."
     )
 
     await callback.message.edit_text(
         text,
         reply_markup=trial_settings_kb(enabled, tariff_name),
-        parse_mode="MarkdownV2"
+        parse_mode="Markdown"
     )
     await callback.answer()
 
@@ -110,49 +110,68 @@ async def admin_trial_edit_text_start(callback: CallbackQuery, state: FSMContext
 
     from bot.states.admin_states import AdminStates
     from bot.keyboards.admin import trial_edit_text_cancel_kb
+    from bot.utils.text import format_text_for_edit
 
     await state.set_state(AdminStates.waiting_for_trial_text)
 
+    from database.requests import get_setting
+    
+    current_text = get_setting('trial_page_text', 'Не задано')
+    
+    await state.update_data(editing_message=callback.message)
+    
     await callback.message.edit_text(
-        "✏️ *Редактирование текста пробной подписки*\n\n"
-        "Отправьте новый текст для страницы\\.\n\n"
-        "⚠️ Используйте *MarkdownV2* для форматирования\\.\n"
-        "Специальные символы `\\. \\! \\( \\) \\- \\_` нужно экранировать обратным слешем\\.",
+        format_text_for_edit("Текст страницы пробной подписки", current_text),
         reply_markup=trial_edit_text_cancel_kb(),
         parse_mode="MarkdownV2"
     )
     await callback.answer()
 
 
-@router.message(StateFilter(AdminStates.waiting_for_trial_text), F.text)
+@router.message(StateFilter(AdminStates.waiting_for_trial_text), F.text, ~F.text.startswith('/'))
 async def admin_trial_edit_text_save(message: Message, state: FSMContext):
     """Сохраняет новый текст страницы пробной подписки."""
     if not is_admin(message.from_user.id):
         return
 
     from database.requests import set_setting
-    from bot.keyboards.admin import trial_settings_kb, back_and_home_kb
-    from database.requests import is_trial_enabled, get_trial_tariff_id, get_tariff_by_id
+    from bot.keyboards.admin import back_and_home_kb
+    from bot.utils.text import get_message_text_for_storage, format_text_after_save
 
-    new_text = message.text
+    data = await state.get_data()
+    editing_message = data.get('editing_message')
+
+    new_text = get_message_text_for_storage(message, 'markdown')
     set_setting('trial_page_text', new_text)
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except:
+        pass
 
     await state.clear()
 
-    enabled = is_trial_enabled()
-    tariff_id = get_trial_tariff_id()
-    tariff_name = None
-    if tariff_id:
-        tariff = get_tariff_by_id(tariff_id)
-        if tariff:
-            status = "🟢" if tariff['is_active'] else "🔴"
-            tariff_name = f"{status} {tariff['name']} ({tariff['duration_days']} дн.)"
-
-    await message.answer(
-        "✅ *Текст страницы пробной подписки обновлён\\!*",
-        parse_mode="MarkdownV2",
-        reply_markup=trial_settings_kb(enabled, tariff_name)
-    )
+    # Редактируем сообщение с новым текстом
+    if editing_message:
+        try:
+            await editing_message.edit_text(
+                format_text_after_save("Текст страницы пробной подписки", new_text),
+                reply_markup=back_and_home_kb("admin_trial"),
+                parse_mode="MarkdownV2"
+            )
+        except:
+            await message.answer(
+                format_text_after_save("Текст страницы пробной подписки", new_text),
+                reply_markup=back_and_home_kb("admin_trial"),
+                parse_mode="MarkdownV2"
+            )
+    else:
+        await message.answer(
+            format_text_after_save("Текст страницы пробной подписки", new_text),
+            reply_markup=back_and_home_kb("admin_trial"),
+            parse_mode="MarkdownV2"
+        )
 
     logger.info(f"Текст пробной подписки обновлён (admin: {message.from_user.id})")
 
@@ -183,12 +202,12 @@ async def admin_trial_select_tariff(callback: CallbackQuery):
 
     await callback.message.edit_text(
         "📋 *Выбор тарифа для пробной подписки*\n\n"
-        "Выберите тариф, который будет выдаваться пользователям\\.\n"
-        "Отображаются все тарифы, включая неактивные для покупки\\.\n\n"
-        "🟢 — активный тариф  \\|  🔴 — неактивный тариф\n"
+        "Выберите тариф, который будет выдаваться пользователям.\n"
+        "Отображаются все тарифы, включая неактивные для покупки.\n\n"
+        "🟢 — активный тариф  |  🔴 — неактивный тариф\n"
         "🔘 — текущий выбор",
         reply_markup=trial_tariff_select_kb(available, selected_id),
-        parse_mode="MarkdownV2"
+        parse_mode="Markdown"
     )
     await callback.answer()
 

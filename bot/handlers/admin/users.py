@@ -16,8 +16,9 @@ from aiogram import Router, F, Bot
 from aiogram.types import (
     Message, CallbackQuery, ReplyKeyboardMarkup, 
     KeyboardButton, ReplyKeyboardRemove, KeyboardButtonRequestUsers,
-    UsersShared
+    UsersShared, InlineKeyboardButton
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 
 from config import ADMIN_IDS
@@ -25,7 +26,9 @@ from database.requests import (
     get_users_stats, get_all_users_paginated, get_user_by_telegram_id,
     toggle_user_ban, get_user_vpn_keys, get_user_payments_stats,
     get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin,
-    get_active_servers, get_all_tariffs
+    get_active_servers, get_all_tariffs,
+    get_user_balance, get_user_referral_coefficient, add_to_balance,
+    deduct_from_balance, set_user_referral_coefficient
 )
 from bot.utils.admin import is_admin
 from bot.utils.text import escape_md
@@ -268,8 +271,9 @@ async def process_user_search_input(message: Message, state: FSMContext):
         return
     
     from database.requests import get_user_by_username
+    from bot.utils.text import get_message_text_for_storage
     
-    text = message.text.strip()
+    text = get_message_text_for_storage(message, 'plain')
     user = None
     
     # Проверяем: число (telegram_id) или @username
@@ -370,13 +374,14 @@ def _format_user_card(user: dict) -> tuple[str, any]:
     is_banned = bool(user.get('is_banned'))
     created_at = user.get('created_at', 'неизвестно')
     
-    # Заголовок
+    balance_cents = get_user_balance(user['id'])
+    referral_coefficient = get_user_referral_coefficient(user['id'])
+    
     if is_banned:
         header = f"🚫 *ЗАБАНЕН* — `{escape_md(format_user_display(user))}`"
     else:
         header = f"👤 *{escape_md(format_user_display(user))}*"
     
-    # Базовая инфо
     lines = [
         header,
         "",
@@ -390,18 +395,19 @@ def _format_user_card(user: dict) -> tuple[str, any]:
     
     lines.append(f"📅 Зарегистрирован: {created_at}")
     
-    # VPN-ключи
+    balance_rub = balance_cents / 100
+    lines.append(f"💰 Баланс: *{balance_rub:.2f} ₽*")
+    lines.append(f"📊 Реферальный коэффициент: *{referral_coefficient}x*")
+    
     vpn_keys = get_user_vpn_keys(user['id'])
     lines.append("")
     
     if vpn_keys:
         lines.append(f"🔑 *VPN-ключи ({len(vpn_keys)}):*")
         for key in vpn_keys:
-            # Формируем название ключа согласно ТЗ
             if key.get('custom_name'):
                 key_name = key['custom_name']
             else:
-                # Формат: первые_4_символа...последние_4_символа от client_uuid
                 uuid = key.get('client_uuid') or ''
                 if len(uuid) >= 8:
                     key_name = f"{uuid[:4]}...{uuid[-4:]}"
@@ -409,7 +415,6 @@ def _format_user_card(user: dict) -> tuple[str, any]:
                     key_name = uuid or f"Ключ #{key['id']}"
             
             expires = key.get('expires_at', '?')
-            # Проверяем истёк ли ключ
             try:
                 expires_dt = datetime.fromisoformat(expires.replace('Z', '+00:00'))
                 if expires_dt < datetime.now(expires_dt.tzinfo if expires_dt.tzinfo else None):
@@ -423,7 +428,6 @@ def _format_user_card(user: dict) -> tuple[str, any]:
     else:
         lines.append("🔑 _VPN-ключей нет_")
     
-    # Статистика оплат
     payment_stats = get_user_payments_stats(user['id'])
     lines.append("")
     lines.append("💳 *Оплаты:*")
@@ -449,7 +453,7 @@ def _format_user_card(user: dict) -> tuple[str, any]:
         lines.append("  _Оплат не было_")
     
     text = "\n".join(lines)
-    keyboard = user_view_kb(telegram_id, vpn_keys, is_banned)
+    keyboard = user_view_kb(telegram_id, vpn_keys, is_banned, balance_cents, referral_coefficient)
     
     return text, keyboard
 
@@ -686,7 +690,9 @@ async def process_key_extend(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    text = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    text = get_message_text_for_storage(message, 'plain')
     
     if not text.isdigit() or int(text) < 1 or int(text) > 365:
         await message.answer(
@@ -813,7 +819,9 @@ async def process_change_traffic_limit(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    text = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    text = get_message_text_for_storage(message, 'plain')
     
     if not text.isdigit():
         await message.answer("❌ Введите число (0 = без лимита)")
@@ -981,7 +989,9 @@ async def process_add_key_traffic(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    text = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    text = get_message_text_for_storage(message, 'plain')
     
     if not text.isdigit():
         await message.answer("❌ Введите число (0 = без лимита)")
@@ -1005,7 +1015,9 @@ async def process_add_key_days(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    text = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    text = get_message_text_for_storage(message, 'plain')
     
     if not text.isdigit() or int(text) < 1 or int(text) > 365:
         await message.answer("❌ Введите число от 1 до 365")
@@ -1134,7 +1146,6 @@ async def add_key_back(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     
     if current_state == AdminStates.add_key_inbound.state:
-        # Возвращаемся к выбору сервера
         servers = get_active_servers()
         await state.set_state(AdminStates.add_key_server)
         
@@ -1146,7 +1157,248 @@ async def add_key_back(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown"
         )
     else:
-        # Для остальных шагов - отмена
         await cancel_add_key(callback, state)
     
     await callback.answer()
+
+
+# ============================================================================
+# УПРАВЛЕНИЕ КОЭФФИЦИЕНТОМ
+# ============================================================================
+
+@router.callback_query(F.data.startswith("admin_user_coefficient:"))
+async def start_coefficient_edit(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования коэффициента."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    telegram_id = int(callback.data.split(":")[1])
+    user = get_user_by_telegram_id(telegram_id)
+    
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    current_coefficient = get_user_referral_coefficient(user['id'])
+    
+    await state.set_state(AdminStates.waiting_coefficient)
+    await state.update_data(
+        coefficient_user_telegram_id=telegram_id,
+        coefficient_edit_message_id=callback.message.message_id
+    )
+    
+    await callback.message.edit_text(
+        f"📊 *Редактирование коэффициента*\n\n"
+        f"👤 {format_user_display(user)}\n"
+        f"📱 ID: `{telegram_id}`\n\n"
+        f"Текущий коэффициент: *{current_coefficient}x*\n\n"
+        "Введите новый коэффициент (0.0 - 10.0):",
+        reply_markup=back_and_home_kb(f"admin_user_view:{telegram_id}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_coefficient, F.text)
+async def process_coefficient_input(message: Message, state: FSMContext):
+    """Обработка ввода коэффициента."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    from bot.utils.text import get_message_text_for_storage
+    
+    text = get_message_text_for_storage(message, 'plain').replace(',', '.')
+    
+    try:
+        coefficient = float(text)
+        if not (0.0 <= coefficient <= 10.0):
+            raise ValueError()
+    except ValueError:
+        await message.delete()
+        return
+    
+    data = await state.get_data()
+    telegram_id = data.get('coefficient_user_telegram_id')
+    edit_message_id = data.get('coefficient_edit_message_id')
+    
+    user = get_user_by_telegram_id(telegram_id)
+    if not user:
+        await message.delete()
+        return
+    
+    set_user_referral_coefficient(user['id'], coefficient)
+    
+    await message.delete()
+    
+    if edit_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=edit_message_id,
+                text=f"📊 *Коэффициент обновлён*\n\n"
+                     f"👤 {format_user_display(user)}\n"
+                     f"📱 ID: `{telegram_id}`\n\n"
+                     f"Новый коэффициент: *{coefficient}x*",
+                reply_markup=back_and_home_kb(f"admin_user_view:{telegram_id}"),
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+    
+    await state.clear()
+
+
+# ============================================================================
+# УПРАВЛЕНИЕ БАЛАНСОМ
+# ============================================================================
+
+@router.callback_query(F.data.regexp(r"^admin_user_balance_add:(\d+)$"))
+async def start_balance_add(callback: CallbackQuery, state: FSMContext):
+    """Начало пополнения баланса пользователя."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    telegram_id = int(callback.data.split(':')[1])
+    user = get_user_by_telegram_id(telegram_id)
+    
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    current_balance = get_user_balance(user['id'])
+    balance_rub = current_balance / 100
+    
+    await state.set_state(AdminStates.waiting_balance_amount)
+    await state.update_data(
+        balance_user_telegram_id=telegram_id,
+        balance_operation='add'
+    )
+    
+    await callback.message.edit_text(
+        f"💰 *Пополнение баланса*\n\n"
+        f"👤 {format_user_display(user)}\n"
+        f"📱 ID: `{telegram_id}`\n"
+        f"💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\n"
+        "Введите сумму пополнения в рублях (например: 100 или 50.5):",
+        reply_markup=back_and_home_kb(f"admin_user_view:{telegram_id}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^admin_user_balance_deduct:(\d+)$"))
+async def start_balance_deduct(callback: CallbackQuery, state: FSMContext):
+    """Начало списания баланса пользователя."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    telegram_id = int(callback.data.split(':')[1])
+    user = get_user_by_telegram_id(telegram_id)
+    
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    current_balance = get_user_balance(user['id'])
+    balance_rub = current_balance / 100
+    
+    await state.set_state(AdminStates.waiting_balance_amount)
+    await state.update_data(
+        balance_user_telegram_id=telegram_id,
+        balance_operation='deduct'
+    )
+    
+    await callback.message.edit_text(
+        f"💸 *Списание баланса*\n\n"
+        f"👤 {format_user_display(user)}\n"
+        f"📱 ID: `{telegram_id}`\n"
+        f"💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\n"
+        "Введите сумму списания в рублях (например: 100 или 50.5):",
+        reply_markup=back_and_home_kb(f"admin_user_view:{telegram_id}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_balance_amount, F.text)
+async def process_balance_amount(message: Message, state: FSMContext):
+    """Обработка ввода суммы баланса."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    from bot.utils.text import get_message_text_for_storage
+    from bot.services.user_locks import user_locks
+    
+    text = get_message_text_for_storage(message, 'plain').replace(',', '.')
+    
+    try:
+        amount_rub = float(text)
+        if amount_rub <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Введите положительное число (например: 100 или 50.5)")
+        return
+    
+    amount_cents = int(round(amount_rub * 100))
+    
+    data = await state.get_data()
+    telegram_id = data.get('balance_user_telegram_id')
+    operation = data.get('balance_operation')
+    
+    if not telegram_id:
+        await message.answer("❌ Ошибка: потерян контекст операции")
+        return
+    
+    user = get_user_by_telegram_id(telegram_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден")
+        return
+    
+    user_id = user['id']
+    current_balance = get_user_balance(user_id)
+    
+    if operation == 'deduct':
+        if amount_cents > current_balance:
+            balance_rub = current_balance / 100
+            await message.answer(
+                f"❌ Недостаточно средств на балансе.\n"
+                f"Текущий баланс: {balance_rub:.2f} ₽\n"
+                f"Попытка списать: {amount_rub:.2f} ₽"
+            )
+            return
+        
+        async with user_locks[user_id]:
+            deduct_from_balance(user_id, amount_cents)
+        
+        new_balance = get_user_balance(user_id)
+        new_balance_rub = new_balance / 100
+        
+        await message.answer(
+            f"✅ Баланс списан\n\n"
+            f"Списано: {amount_rub:.2f} ₽\n"
+            f"Новый баланс: {new_balance_rub:.2f} ₽"
+        )
+        logger.info(f"Админ {message.from_user.id} списал {amount_cents} коп с баланса user {user_id}")
+    else:
+        async with user_locks[user_id]:
+            add_to_balance(user_id, amount_cents)
+        
+        new_balance = get_user_balance(user_id)
+        new_balance_rub = new_balance / 100
+        
+        await message.answer(
+            f"✅ Баланс пополнен\n\n"
+            f"Пополнено: {amount_rub:.2f} ₽\n"
+            f"Новый баланс: {new_balance_rub:.2f} ₽"
+        )
+        logger.info(f"Админ {message.from_user.id} пополнил баланс user {user_id} на {amount_cents} коп")
+    
+    try:
+        await message.delete()
+    except:
+        pass
+    
+    await state.update_data(balance_user_telegram_id=None, balance_operation=None)

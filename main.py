@@ -20,7 +20,7 @@ from bot.services.scheduler import run_daily_tasks, run_update_check_scheduler
 # Импорт роутеров
 from bot.handlers.user.main import router as user_router
 from bot.handlers.user.payments import router as payments_router
-# Импортируем общий роутер админки, который уже включает в себя все подроутеры
+from bot.handlers.user.referral import router as referral_router
 from bot.handlers.admin import admin_router
 
 
@@ -85,6 +85,7 @@ async def main():
     # Порядок важен: сначала более специфичные, потом общие
     dp.include_router(admin_router)           # Админ-панель (общая)
     dp.include_router(payments_router)        # Платежи (ДО user, чтобы /start bill1 работал)
+    dp.include_router(referral_router)        # Реферальная система
     dp.include_router(user_router)            # Пользователь
     
     # Регистрируем startup/shutdown

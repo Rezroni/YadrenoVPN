@@ -3,6 +3,7 @@
 
 Проверка подписей, создание/продление ключей после оплаты.
 Создание QR-платежей через ЮКасса REST API.
+Реферальные начисления.
 """
 import hmac
 import hashlib
@@ -12,15 +13,24 @@ import base64
 import aiohttp
 import qrcode
 import io
+import math
 from typing import Optional, Dict, Any, Tuple
 
 from database.requests import (
     find_order_by_order_id, complete_order, is_order_already_paid,
     get_vpn_key_by_id, extend_vpn_key, get_setting,
-    get_yookassa_credentials
+    get_yookassa_credentials,
+    is_referral_enabled, get_referral_reward_type, get_active_referral_levels,
+    get_user_referrer, get_user_referral_coefficient, get_user_balance,
+    add_to_balance, deduct_from_balance, add_days_to_first_active_key,
+    update_referral_stat
 )
+from bot.services.exchange_rate import get_usd_rub_rate
 
 logger = logging.getLogger(__name__)
+
+STAR_TO_USD = 0.013
+USDT_TO_USD = 1.0
 
 YOOKASSA_API_URL = "https://api.yookassa.ru/v3/payments"
 
@@ -175,24 +185,25 @@ async def process_payment_order(order_id: str) -> Tuple[bool, str, Optional[Dict
     
     logger.info(f"Order {order_id} processed (paid)")
 
-    # 4. Обработка ключа (Продление или Создание)
+    user_internal_id = order['user_id']
+    days = order.get('period_days') or order.get('duration_days') or 30
+
     if order['vpn_key_id']:
-        # Продление
-        days = order.get('period_days') or order.get('duration_days')
         if days and extend_vpn_key(order['vpn_key_id'], days):
             logger.info(f"Ключ {order['vpn_key_id']} продлён на {days} дней (order={order_id})")
             
-            # Сброс трафика и продление на сервере
             from bot.services.vpn_api import reset_key_traffic_if_active, extend_key_on_server
             await reset_key_traffic_if_active(order['vpn_key_id'])
             await extend_key_on_server(order['vpn_key_id'], days)
+            
+            if order.get('payment_type') == 'crypto':
+                await process_referral_reward(user_internal_id, days, order.get('amount_cents', 0), 'crypto')
             
             return True, f"✅ Оплата прошла успешно!\n\nВаш ключ продлён на {days} дней.", order
         else:
             logger.error(f"Не удалось продлить ключ {order['vpn_key_id']} после оплаты!")
             return True, "✅ Оплата принята!\n\n⚠️ Возникла проблема с продлением. Мы разберёмся.", order
     else:
-        # Новый ключ (Черновик)
         if not order.get('tariff_id'):
             logger.error(f"Ордер {order_id}: тариф не найден или неактивен в БД (received tariff_id could not be resolved).")
             from bot.errors import TariffNotFoundError
@@ -200,14 +211,16 @@ async def process_payment_order(order_id: str) -> Tuple[bool, str, Optional[Dict
         
         try:
             days = order.get('period_days') or order.get('duration_days') or 30
-            # Создаем черновик
             key_id = create_initial_vpn_key(order['user_id'], order['tariff_id'], days)
             
-            # Привязываем к платежу
             update_payment_key_id(order_id, key_id)
-            order['vpn_key_id'] = key_id # Обновляем объект
+            order['vpn_key_id'] = key_id
             
             logger.info(f"Создан черновик ключа {key_id} для заказа {order_id}")
+            
+            if order.get('payment_type') == 'crypto':
+                await process_referral_reward(user_internal_id, days, order.get('amount_cents', 0), 'crypto')
+            
             return True, "✅ Оплата прошла успешно!", order
             
         except Exception as e:
@@ -569,4 +582,122 @@ async def check_yookassa_payment_status(yookassa_payment_id: str) -> str:
             status = data.get('status', 'pending')
             logger.debug(f"ЮКасса payment {yookassa_payment_id}: status={status}")
             return status
+
+
+def convert_to_rub_cents(amount_raw: int, payment_type: str, usd_rub_rate: int) -> int:
+    """
+    Конвертировать сырую сумму в копейки рублей.
+    
+    Args:
+        amount_raw: сырая сумма (звёзды/центы USDT/копейки рублей)
+        payment_type: тип платежа ('stars', 'crypto', 'cards', 'yookassa_qr')
+        usd_rub_rate: курс USD/RUB в копейках
+    
+    Returns:
+        Сумма в копейках рублей
+    """
+    if payment_type == 'stars':
+        usd_cents = int(amount_raw * STAR_TO_USD * 100)
+        return usd_cents * usd_rub_rate // 100
+    elif payment_type == 'crypto':
+        usd_cents = amount_raw
+        return usd_cents * usd_rub_rate // 100
+    else:
+        return amount_raw
+
+
+async def process_referral_reward(
+    payer_id: int,
+    period_days: int,
+    amount_raw: int,
+    payment_type: str
+) -> None:
+    """
+    Обработка реферального вознаграждения при оплате.
+    Вызывается ПОСЛЕ успешной обработки платежа.
+    
+    Args:
+        payer_id: Внутренний ID пользователя, который оплатил
+        period_days: Сколько дней купил реферал
+        amount_raw: СЫРАЯ сумма:
+            - 'stars': количество звёзд (int)
+            - 'crypto': центы USDT (int)
+            - 'cards': копейки рублей (int)
+            - 'yookassa_qr': копейки рублей (int)
+        payment_type: Тип платежа ('stars', 'crypto', 'cards', 'yookassa_qr')
+    
+    Note:
+        При оплате балансом реферальные вознаграждения НЕ начисляются,
+        поэтому эта функция не вызывается для платежей балансом.
+    """
+    if not is_referral_enabled():
+        return
+    
+    reward_type = get_referral_reward_type()
+    levels = get_active_referral_levels()
+    
+    if not levels:
+        return
+    
+    usd_rub_rate = await get_usd_rub_rate()
+    amount_rub_cents = convert_to_rub_cents(amount_raw, payment_type, usd_rub_rate)
+    
+    current_user_id = payer_id
+    
+    from bot.services.user_locks import user_locks
+    
+    for level_num, percent in levels:
+        referrer_id = get_user_referrer(current_user_id)
+        if not referrer_id:
+            break
+        
+        coefficient = get_user_referral_coefficient(referrer_id)
+        
+        if reward_type == 'balance':
+            base_reward = amount_rub_cents * (percent / 100)
+            final_reward = int(base_reward * coefficient)
+            final_reward = round(final_reward / 100) * 100
+            
+            if final_reward > 0:
+                async with user_locks[referrer_id]:
+                    add_to_balance(referrer_id, final_reward)
+            
+            reward_days = 0
+        else:
+            base_days = period_days * (percent / 100)
+            final_days = base_days * coefficient
+            reward_days = math.ceil(final_days)
+            
+            if reward_days > 0:
+                add_days_to_first_active_key(referrer_id, reward_days)
+            
+            final_reward = 0
+        
+        update_referral_stat(
+            referrer_id, payer_id, level_num,
+            final_reward, reward_days
+        )
+        
+        current_user_id = referrer_id
+
+
+def calculate_balance_discount(user_id: int, tariff_price_cents: int) -> tuple[int, int]:
+    """
+    Рассчитать скидку с баланса. БЕЗ списания!
+    
+    Args:
+        user_id: Внутренний ID пользователя
+        tariff_price_cents: Цена тарифа в копейках
+    
+    Returns:
+        Кортеж (remaining_to_pay_cents, to_deduct_cents):
+        - remaining_to_pay_cents: сколько нужно оплатить внешним способом
+        - to_deduct_cents: сколько будет списано с баланса ПРИ УСПЕШНОЙ оплате
+    """
+    balance = get_user_balance(user_id)
+    
+    if balance >= tariff_price_cents:
+        return 0, tariff_price_cents
+    else:
+        return tariff_price_cents - balance, balance
 

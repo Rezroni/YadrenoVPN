@@ -231,8 +231,9 @@ async def edit_texts_menu(callback: CallbackQuery, state: FSMContext):
     
     builder.row(InlineKeyboardButton(text="📝 Главная страница", callback_data="edit_text:main_page_text"))
     builder.row(InlineKeyboardButton(text="📝 Справка (текст)", callback_data="edit_text:help_page_text"))
-    builder.row(InlineKeyboardButton(text="📢 Ссылка: Новости", callback_data="edit_text:news_channel_link"))
-    builder.row(InlineKeyboardButton(text="💬 Ссылка: Поддержка", callback_data="edit_text:support_channel_link"))
+    builder.row(InlineKeyboardButton(text="📝 Текст перед оплатой", callback_data="edit_text:prepayment_text"))
+    builder.row(InlineKeyboardButton(text="📢 Ссылка: Новости", callback_data="edit_link:news"))
+    builder.row(InlineKeyboardButton(text="💬 Ссылка: Поддержка", callback_data="edit_link:support"))
     
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_bot_settings"))
     
@@ -254,6 +255,7 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
 
     from database.requests import get_setting
     from bot.keyboards.admin import cancel_kb
+    from bot.utils.text import format_text_for_edit
     
     key = callback.data.split(":")[1]
     
@@ -262,8 +264,7 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     ALLOWED_KEYS = {
         'main_page_text',
         'help_page_text',
-        'news_channel_link',
-        'support_channel_link',
+        'prepayment_text',
     }
     
     if key not in ALLOWED_KEYS:
@@ -274,81 +275,296 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     titles = {
         'main_page_text': 'Текст главной страницы',
         'help_page_text': 'Текст страницы справки',
-        'news_channel_link': 'Ссылка на канал новостей',
-        'support_channel_link': 'Ссылка на чат поддержки',
+        'prepayment_text': 'Текст перед оплатой',
     }
     
     current_value = get_setting(key, "Не задано")
     
-    # Спец. сообщение для новостей (реклама)
-    ad_text = ""
-    if key == 'news_channel_link':
-        ad_text = (
-            "\n\n📢 *Прокачай свой канал с @Ya\_FooterBot*\n\n"
-            "Автоматические подписи в три клика:\n"
-            "• 🔄 Автоматическая ротация подписей\n"
-            "• ⏱ Удаление постов по таймеру\n"
-            "• 📈 Курсы валют и биржевые сводки\n\n"
-            "Легко, быстро, эффективно!"
-        )
-    
     await state.set_state(AdminStates.waiting_for_text)
-    await state.update_data(editing_key=key)
+    await state.update_data(editing_key=key, editing_message=callback.message)
     
     await callback.message.edit_text(
-        f"✏️ *Редактирование: {titles.get(key, key)}*\n\n"
-        f"📜 *Текущее значение:*\n"
-        f"```\n{current_value}\n```\n\n"
-        f"👇 Отправьте новое значение сообщением (или нажмите Отмена).{ad_text}",
+        format_text_for_edit(titles.get(key, key), current_value),
         reply_markup=cancel_kb("admin_edit_texts"),
+        parse_mode="MarkdownV2"
+    )
+    await callback.answer()
+
+
+# ============================================================================
+# РЕДАКТИРОВАНИЕ КНОПОК-ССЫЛОК
+# ============================================================================
+
+@router.callback_query(F.data.startswith("edit_link:"))
+async def edit_link_menu(callback: CallbackQuery, state: FSMContext):
+    """Меню редактирования кнопки-ссылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from database.requests import get_setting
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    
+    link_type = callback.data.split(":")[1]
+    
+    if link_type not in ('news', 'support'):
+        await callback.answer("⛔ Недопустимый параметр", show_alert=True)
+        return
+    
+    # Получаем текущие настройки
+    link_key = f"{link_type}_channel_link"
+    hidden_key = f"{link_type}_hidden"
+    name_key = f"{link_type}_button_name"
+    
+    current_url = get_setting(link_key, "Не задано")
+    is_hidden = get_setting(hidden_key, "0") == "1"
+    button_name = get_setting(name_key, "Новости" if link_type == "news" else "Поддержка")
+    
+    # Названия для заголовка
+    titles = {
+        'news': 'Новости',
+        'support': 'Поддержка'
+    }
+    
+    hidden_status = "👁️ Скрыта" if is_hidden else "👁️‍🗨️ Показывается"
+    
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(InlineKeyboardButton(
+        text="🔗 Изменить ссылку",
+        callback_data=f"edit_link_url:{link_type}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text=f"{'👁️‍🗨️ Показать' if is_hidden else '👁️ Скрыть'} кнопку",
+        callback_data=f"toggle_link_hidden:{link_type}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text=f"✏️ Название: {button_name}",
+        callback_data=f"edit_link_name:{link_type}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data="admin_edit_texts"
+    ))
+    
+    await callback.message.edit_text(
+        f"🔗 *Редактирование: {titles[link_type]}*\n\n"
+        f"📍 *Ссылка:* `{current_url}`\n"
+        f"🏷 *Название кнопки:* {button_name}\n"
+        f"👀 *Статус:* {hidden_status}",
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_text)
+@router.callback_query(F.data.startswith("edit_link_url:"))
+async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования URL ссылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from database.requests import get_setting
+    from bot.keyboards.admin import cancel_kb
+    
+    link_type = callback.data.split(":")[1]
+    
+    if link_type not in ('news', 'support'):
+        await callback.answer("⛔ Недопустимый параметр", show_alert=True)
+        return
+    
+    link_key = f"{link_type}_channel_link"
+    current_url = get_setting(link_key, "Не задано")
+    
+    titles = {
+        'news': 'Новости',
+        'support': 'Поддержка'
+    }
+    
+    await state.set_state(AdminStates.waiting_for_text)
+    await state.update_data(editing_key=link_key, return_to=f"edit_link:{link_type}")
+    
+    await callback.message.edit_text(
+        f"🔗 *Изменение ссылки: {titles[link_type]}*\n\n"
+        f"📜 *Текущая ссылка:*\n`{current_url}`\n\n"
+        f"👇 Отправьте новую ссылку (должна начинаться с http:// или https://):",
+        reply_markup=cancel_kb(f"edit_link:{link_type}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("toggle_link_hidden:"))
+async def toggle_link_hidden(callback: CallbackQuery, state: FSMContext):
+    """Переключение видимости кнопки-ссылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from database.requests import get_setting, set_setting
+    
+    link_type = callback.data.split(":")[1]
+    
+    if link_type not in ('news', 'support'):
+        await callback.answer("⛔ Недопустимый параметр", show_alert=True)
+        return
+    
+    hidden_key = f"{link_type}_hidden"
+    current = get_setting(hidden_key, "0")
+    new_value = "1" if current == "0" else "0"
+    set_setting(hidden_key, new_value)
+    
+    # Возвращаемся в меню редактирования ссылки
+    await edit_link_menu(callback, state)
+
+
+@router.callback_query(F.data.startswith("edit_link_name:"))
+async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования названия кнопки-ссылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from database.requests import get_setting
+    from bot.keyboards.admin import cancel_kb
+    
+    link_type = callback.data.split(":")[1]
+    
+    if link_type not in ('news', 'support'):
+        await callback.answer("⛔ Недопустимый параметр", show_alert=True)
+        return
+    
+    name_key = f"{link_type}_button_name"
+    current_name = get_setting(name_key, "Новости" if link_type == "news" else "Поддержка")
+    
+    titles = {
+        'news': 'Новости',
+        'support': 'Поддержка'
+    }
+    
+    await state.set_state(AdminStates.waiting_for_link_button_name)
+    await state.update_data(editing_name_key=name_key, link_type=link_type)
+    
+    await callback.message.edit_text(
+        f"✏️ *Изменение названия кнопки: {titles[link_type]}*\n\n"
+        f"🏷 *Текущее название:* {current_name}\n\n"
+        f"👇 Отправьте новое название для кнопки (максимум 30 символов):",
+        reply_markup=cancel_kb(f"edit_link:{link_type}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_link_button_name)
+async def edit_link_name_save(message: Message, state: FSMContext):
+    """Сохранение нового названия кнопки-ссылки."""
+    from database.requests import set_setting
+    from bot.keyboards.admin import back_and_home_kb
+    
+    data = await state.get_data()
+    name_key = data.get('editing_name_key')
+    link_type = data.get('link_type')
+    
+    if not name_key:
+        await state.clear()
+        await message.answer("❌ Ошибка состояния.")
+        return
+    
+    from bot.utils.text import get_message_text_for_storage
+    
+    new_name = get_message_text_for_storage(message, 'plain')[:30]
+    
+    if len(new_name) < 1:
+        await message.answer(
+            "❌ *Название не может быть пустым*\n\n"
+            "Попробуйте ещё раз или нажмите Отмена.",
+            reply_markup=back_and_home_kb(f"edit_link:{link_type}" if link_type else "admin_edit_texts"),
+            parse_mode="Markdown"
+        )
+        return
+    
+    set_setting(name_key, new_name)
+    await state.clear()
+    
+    await message.answer(
+        f"✅ *Название сохранено!*\n\n{new_name}",
+        reply_markup=back_and_home_kb(f"edit_link:{link_type}" if link_type else "admin_edit_texts"),
+        parse_mode="Markdown"
+    )
+
+
+@router.message(AdminStates.waiting_for_text, ~F.text.startswith('/'))
 async def edit_text_save(message: Message, state: FSMContext):
-    """Сохранение нового значения текста."""
+    """Сохранение нового значения текста. Игнорирует команды (/start, /help и т.д.)."""
     from database.requests import set_setting
     from bot.keyboards.admin import back_and_home_kb, cancel_kb
+    from bot.utils.text import get_message_text_for_storage, format_text_after_save
     
     data = await state.get_data()
     key = data.get('editing_key')
+    editing_message = data.get('editing_message')
+    return_to = data.get('return_to', 'admin_edit_texts')
     
     if not key:
         await state.clear()
         await message.answer("❌ Ошибка состояния.")
         return
     
-    # Для ссылок используем сырой текст, для остальных — md_text (чтобы сохранить форматирование)
-    if key in ('news_channel_link', 'support_channel_link'):
-        new_value = message.text.strip()
-    else:
-        # md_text экранирует для MarkdownV2
-        new_value = message.md_text.strip() if message.md_text else message.text.strip()
+    # Для ссылок используем plain (без экранирования), для текстов — markdown
+    text_type = 'plain' if key.endswith('_channel_link') else 'markdown'
+    new_value = get_message_text_for_storage(message, text_type)
     
     # Валидация для ссылок: должны начинаться с http:// или https://
-    if key in ('news_channel_link', 'support_channel_link'):
+    if key.endswith('_channel_link'):
         if not new_value.startswith(('http://', 'https://')):
             await message.answer(
                 "❌ *Ошибка:* Ссылка должна начинаться с `http://` или `https://`\n\n"
                 f"Вы ввели: `{new_value}`\n\n"
                 "Попробуйте ещё раз или нажмите Отмена.",
-                reply_markup=cancel_kb("admin_edit_texts"),
+                reply_markup=cancel_kb(return_to),
                 parse_mode="Markdown"
             )
             return
     
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except:
+        pass
+    
     # Сохраняем
     set_setting(key, new_value)
     
+    # Названия для заголовка
+    titles = {
+        'main_page_text': 'Текст главной страницы',
+        'help_page_text': 'Текст страницы справки',
+        'prepayment_text': 'Текст перед оплатой',
+    }
+    
     await state.clear()
     
-    await message.answer(
-        f"✅ *Значение сохранено!*\n\n{new_value}",
-        reply_markup=back_and_home_kb("admin_edit_texts"),
-        parse_mode="Markdown"
-    )
+    # Редактируем сообщение с новым текстом
+    if editing_message:
+        try:
+            await editing_message.edit_text(
+                format_text_after_save(titles.get(key, key), new_value),
+                reply_markup=back_and_home_kb(return_to),
+                parse_mode="MarkdownV2"
+            )
+        except:
+            await message.answer(
+                format_text_after_save(titles.get(key, key), new_value),
+                reply_markup=back_and_home_kb(return_to),
+                parse_mode="MarkdownV2"
+            )
+    else:
+        await message.answer(
+            format_text_after_save(titles.get(key, key), new_value),
+            reply_markup=back_and_home_kb(return_to),
+            parse_mode="MarkdownV2"
+        )
 
 
 # ============================================================================

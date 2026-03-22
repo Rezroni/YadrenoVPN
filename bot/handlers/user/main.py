@@ -14,7 +14,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramForbiddenError
 
 from config import ADMIN_IDS
-from database.requests import get_or_create_user, is_user_banned, get_all_servers
+from database.requests import (
+    get_or_create_user, is_user_banned, get_all_servers, get_setting,
+    is_referral_enabled, get_user_by_referral_code, set_user_referrer
+)
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
 from bot.utils.text import escape_md
@@ -96,13 +99,10 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     
     logger.info(f"CMD_START: User {user_id} started bot")
 
-    # Сбрасываем любое активное FSM-состояние (важно: до проверок)
     await state.clear()
 
-    # Регистрируем/обновляем пользователя
-    user = get_or_create_user(user_id, username)
+    user, is_new = get_or_create_user(user_id, username)
     
-    # Проверяем бан
     if user.get('is_banned'):
         await message.answer(
             "⛔ *Доступ заблокирован*\n\n"
@@ -111,30 +111,24 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         )
         return
     
-    # Проверяем админа
     is_admin = user_id in ADMIN_IDS
     
     text = get_welcome_text(is_admin)
     
-    # Проверяем аргументы запуска (deep linking)
     args = command.args
     if args and args.startswith("bill"):
         from bot.services.billing import process_crypto_payment
         from bot.handlers.user.payments import finalize_payment_ui
         
-        # Обрабатываем платеж (вернет (success, text, order))
         try:
             success, text, order = await process_crypto_payment(args, user_id=user['id'])
             
             if success and order:
-                # Используем единый финализатор UI (передаём telegram_id!)
                 await finalize_payment_ui(message, state, text, order, user_id=message.from_user.id)
             else:
-                # Обычная ошибка (возвращенная текстом)
                  await message.answer(text, parse_mode="Markdown")
                  
         except Exception as e:
-            # Проверяем, является ли это нашей ошибкой
             from bot.errors import TariffNotFoundError
             
             if isinstance(e, TariffNotFoundError):
@@ -144,24 +138,31 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
                  support_link = get_setting('support_channel_link', 'https://t.me/YadrenoChat')
                  await message.answer(str(e), reply_markup=support_kb(support_link), parse_mode="Markdown")
             else:
-                # Неизвестная ошибка
                 logger.exception(f"Ошибка обработки платежа: {e}")
                 await message.answer("❌ Произошла ошибка при обработке платежа.", parse_mode="Markdown")
         
         return
+    
+    if is_new and args and args.startswith("ref_"):
+        ref_code = args[4:]
+        referrer = get_user_by_referral_code(ref_code)
+        if referrer and referrer['id'] != user['id']:
+            if set_user_referrer(user['id'], referrer['id']):
+                logger.info(f"User {user_id} привязан к рефереру {referrer['telegram_id']}")
 
-    # Вычисляем, показывать ли кнопку пробной подписки
     from database.requests import is_trial_enabled, get_trial_tariff_id, has_used_trial
     show_trial = (
         is_trial_enabled() and
         get_trial_tariff_id() is not None and
         not has_used_trial(user_id)
     )
+    
+    show_referral = is_referral_enabled()
 
     try:
         await message.answer(
             text,
-            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial),
+            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral),
             parse_mode="MarkdownV2"
         )
     except TelegramForbiddenError:
@@ -197,23 +198,22 @@ async def callback_start(callback: CallbackQuery, state: FSMContext):
         not has_used_trial(user_id)
     )
     
-    # Пытаемся отредактировать сообщение (если текст)
-    # Если это фото/файл (после выдачи ключа), edit_text упадёт.
+    show_referral = is_referral_enabled()
+    
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial),
+            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral),
             parse_mode="MarkdownV2"
         )
     except Exception:
-        # Удаляем фото/файл и отправляем новое сообщение
         try:
             await callback.message.delete()
         except:
             pass
         await callback.message.answer(
             text,
-            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial),
+            reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral),
             parse_mode="MarkdownV2"
         )
 
@@ -291,8 +291,7 @@ async def activate_trial_subscription(callback: CallbackQuery, state: FSMContext
         await callback.answer("❌ Тариф не найден", show_alert=True)
         return
 
-    # Получаем внутренний ID пользователя
-    user = get_or_create_user(user_id, callback.from_user.username)
+    user, _ = get_or_create_user(user_id, callback.from_user.username)
     internal_user_id = user['id']
 
     # Ставим флаг пробного периода
@@ -476,10 +475,23 @@ async def show_help(send_function):
     if not support_link or not support_link.startswith(('http://', 'https://')):
         support_link = default_support
     
+    # Получаем настройки видимости и названий кнопок
+    news_hidden = get_setting('news_hidden', '0') == '1'
+    support_hidden = get_setting('support_hidden', '0') == '1'
+    news_name = get_setting('news_button_name', 'Новости')
+    support_name = get_setting('support_button_name', 'Поддержка')
+    
     # Ошибки Markdown парсинга обрабатываются глобально в SafeParseSession
     await send_function(
         help_text,
-        reply_markup=help_kb(news_link, support_link),
+        reply_markup=help_kb(
+            news_link, 
+            support_link, 
+            news_hidden=news_hidden, 
+            support_hidden=support_hidden,
+            news_name=news_name,
+            support_name=support_name
+        ),
         parse_mode="MarkdownV2"
     )
 
@@ -734,7 +746,8 @@ async def key_renew_select_payment(callback: CallbackQuery):
     from database.requests import (
         get_all_tariffs, get_key_details_for_user, get_user_internal_id,
         is_crypto_configured, is_stars_enabled, is_cards_enabled, get_setting,
-        create_pending_order, get_crypto_integration_mode
+        create_pending_order, get_crypto_integration_mode,
+        is_referral_enabled, get_referral_reward_type, get_user_balance
     )
     from bot.services.billing import build_crypto_payment_url, extract_item_id_from_url
     from bot.keyboards.user import renew_payment_method_kb, back_and_home_kb
@@ -742,13 +755,11 @@ async def key_renew_select_payment(callback: CallbackQuery):
     key_id = int(callback.data.split(":")[1])
     telegram_id = callback.from_user.id
     
-    # Проверяем принадлежность ключа
     key = get_key_details_for_user(key_id, telegram_id)
     if not key:
         await callback.answer("❌ Ключ не найден или вы не являетесь его владельцем.", show_alert=True)
         return
     
-    # Получаем методы оплаты
     crypto_configured = is_crypto_configured()
     stars_enabled = is_stars_enabled()
     cards_enabled = is_cards_enabled()
@@ -766,37 +777,40 @@ async def key_renew_select_payment(callback: CallbackQuery):
          await callback.answer()
          return
 
-    # Подготовка URL для крипты
     crypto_url = None
     crypto_mode = get_crypto_integration_mode()
+    user_id = get_user_internal_id(telegram_id)
 
-    if crypto_configured:
-        # Для генерации ссылки нужен PENDING ORDER.
-        # Создаём его с placeholder-тарифом (первым активным), т.к. реальный выберет пользователь в Ya.Seller
+    if crypto_configured and user_id:
         tariffs = get_all_tariffs(include_hidden=False)
         if tariffs:
             placeholder_tariff = tariffs[0]
-            user_id = get_user_internal_id(telegram_id)
             
-            if user_id:
-                 _, order_id = create_pending_order(
-                    user_id=user_id,
-                    tariff_id=placeholder_tariff['id'],
-                    payment_type='crypto',
-                    vpn_key_id=key_id
-                )
-                 
-                 if crypto_mode == 'standard':
-                     item_url = get_setting('crypto_item_url')
-                     item_id = extract_item_id_from_url(item_url)
-                     
-                     if item_id:
-                         crypto_url = build_crypto_payment_url(
-                            item_id=item_id,
-                            invoice_id=order_id,
-                            tariff_external_id=None, # Не фиксируем тариф, юзер выберет сам
-                            price_cents=None
-                         )
+            _, order_id = create_pending_order(
+                user_id=user_id,
+                tariff_id=placeholder_tariff['id'],
+                payment_type='crypto',
+                vpn_key_id=key_id
+            )
+            
+            if crypto_mode == 'standard':
+                item_url = get_setting('crypto_item_url')
+                item_id = extract_item_id_from_url(item_url)
+                
+                if item_id:
+                    crypto_url = build_crypto_payment_url(
+                       item_id=item_id,
+                       invoice_id=order_id,
+                       tariff_external_id=None,
+                       price_cents=None
+                    )
+    
+    show_balance_button = False
+    if is_referral_enabled() and get_referral_reward_type() == 'balance':
+        if user_id:
+            balance_cents = get_user_balance(user_id)
+            if balance_cents > 0:
+                show_balance_button = True
     
     await callback.message.edit_text(
         f"💳 *Продление ключа*\n\n"
@@ -809,7 +823,8 @@ async def key_renew_select_payment(callback: CallbackQuery):
             crypto_configured=crypto_configured,
             stars_enabled=stars_enabled, 
             cards_enabled=cards_enabled,
-            yookassa_qr_enabled=yookassa_qr
+            yookassa_qr_enabled=yookassa_qr,
+            show_balance_button=show_balance_button
         ),
         parse_mode="Markdown"
     )
@@ -1116,10 +1131,11 @@ async def key_rename_start_handler(callback: CallbackQuery, state: FSMContext):
 async def key_rename_submit_handler(message: Message, state: FSMContext):
     """Обработка ввода нового имени ключа."""
     from database.requests import update_key_custom_name
+    from bot.utils.text import get_message_text_for_storage
     
     data = await state.get_data()
     key_id = data.get('key_id')
-    new_name = message.text.strip()
+    new_name = get_message_text_for_storage(message, 'plain')
     
     if not key_id:
         await state.clear()
@@ -1186,7 +1202,8 @@ async def buy_key_handler(callback: CallbackQuery):
     from database.requests import (
         is_crypto_configured, is_stars_enabled, is_cards_enabled, get_setting,
         get_user_internal_id, get_all_tariffs, create_pending_order,
-        is_yookassa_qr_configured, get_crypto_integration_mode
+        is_yookassa_qr_configured, get_crypto_integration_mode,
+        is_referral_enabled, get_referral_reward_type, get_user_balance
     )
     from bot.services.billing import build_crypto_payment_url, extract_item_id_from_url
     from bot.keyboards.user import buy_key_kb
@@ -1194,42 +1211,45 @@ async def buy_key_handler(callback: CallbackQuery):
 
     telegram_id = callback.from_user.id
 
-    # Проверяем какие методы оплаты доступны
     crypto_configured = is_crypto_configured()
     crypto_mode = get_crypto_integration_mode()
     crypto_url = None
-    existing_order_id = None  # Сохраняем ID ордера для переиспользования в Stars/Cards и Crypto simple
+    existing_order_id = None
 
-    if crypto_configured:
-        # Создаём pending order
-        user_id = get_user_internal_id(telegram_id)
-        if user_id:
-            _, order_id = create_pending_order(
-                user_id=user_id,
-                tariff_id=None,
-                payment_type=None,
-                vpn_key_id=None  # Новый ключ
-            )
-            existing_order_id = order_id
+    user_id = get_user_internal_id(telegram_id)
 
-            if crypto_mode == 'standard':
-                # Формируем ссылку с invoice для стандартного режима
-                crypto_item_url = get_setting('crypto_item_url')
-                item_id = extract_item_id_from_url(crypto_item_url)
+    if crypto_configured and user_id:
+        _, order_id = create_pending_order(
+            user_id=user_id,
+            tariff_id=None,
+            payment_type=None,
+            vpn_key_id=None
+        )
+        existing_order_id = order_id
 
-                if item_id:
-                    crypto_url = build_crypto_payment_url(
-                        item_id=item_id,
-                        invoice_id=order_id,
-                        tariff_external_id=None,  # Пользователь выберет в боте Ya.Seller
-                        price_cents=None
-                    )
+        if crypto_mode == 'standard':
+            crypto_item_url = get_setting('crypto_item_url')
+            item_id = extract_item_id_from_url(crypto_item_url)
+
+            if item_id:
+                crypto_url = build_crypto_payment_url(
+                    item_id=item_id,
+                    invoice_id=order_id,
+                    tariff_external_id=None,
+                    price_cents=None
+                )
 
     stars_enabled = is_stars_enabled()
     cards_enabled = is_cards_enabled()
     yookassa_qr = is_yookassa_qr_configured()
     
-    # Если нет ни одного метода оплаты — показываем заглушку
+    show_balance_button = False
+    if is_referral_enabled() and get_referral_reward_type() == 'balance':
+        if user_id:
+            balance_cents = get_user_balance(user_id)
+            if balance_cents > 0:
+                show_balance_button = True
+    
     if not crypto_configured and not stars_enabled and not cards_enabled and not yookassa_qr:
         await callback.message.edit_text(
             "💳 *Купить ключ*\n\n"
@@ -1241,22 +1261,8 @@ async def buy_key_handler(callback: CallbackQuery):
         await callback.answer()
         return
     
-    # Формируем текст с условиями
-    text = """💳 *Купить ключ*
-
-🔐 *Что вы получаете:*
-• Доступ к нескольким серверам и протоколам
-• 1 ключ = 1 устройство (одновременное подключение)
-• Лимит трафика: до 1 ТБ в месяц (сброс каждые 30 дней)
-
-⚠️ *Важно знать:*
-• Средства не возвращаются — услуга считается оказанной в момент получения ключа
-• Мы не даём никаких гарантий бесперебойной работы сервиса в будущем
-• Мы не можем гарантировать, что данная технология останется рабочей
-
-_Приобретая ключ, вы соглашаетесь с этими условиями._
-
-Выберите способ оплаты:"""
+    prepayment_text = get_setting('prepayment_text') or ""
+    text = f"{prepayment_text}\n\nВыберите способ оплаты\:"
     
     try:
         await callback.message.edit_text(
@@ -1268,9 +1274,10 @@ _Приобретая ключ, вы соглашаетесь с этими ус
                 stars_enabled=stars_enabled,
                 cards_enabled=cards_enabled, 
                 yookassa_qr_enabled=yookassa_qr,
-                order_id=existing_order_id
+                order_id=existing_order_id,
+                show_balance_button=show_balance_button
             ),
-            parse_mode="Markdown"
+            parse_mode="MarkdownV2"
         )
     except Exception:
         try:
@@ -1286,9 +1293,10 @@ _Приобретая ключ, вы соглашаетесь с этими ус
                 stars_enabled=stars_enabled,
                 cards_enabled=cards_enabled, 
                 yookassa_qr_enabled=yookassa_qr,
-                order_id=existing_order_id
+                order_id=existing_order_id,
+                show_balance_button=show_balance_button
             ),
-            parse_mode="Markdown"
+            parse_mode="MarkdownV2"
         )
         
     await callback.answer()
@@ -1353,7 +1361,10 @@ async def pay_crypto_select_tariff(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("crypto_pay:"))
 async def pay_crypto_invoice(callback: CallbackQuery):
     """Создание ссылки на оплату Crypto (Простой режим)."""
-    from database.requests import get_tariff_by_id, update_order_tariff, get_setting, get_user_internal_id, create_pending_order
+    from database.requests import (
+        get_tariff_by_id, update_order_tariff, get_setting, 
+        get_user_internal_id, create_pending_order
+    )
     from bot.services.billing import build_crypto_payment_url, extract_item_id_from_url
     
     parts = callback.data.split(":")

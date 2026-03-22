@@ -153,16 +153,16 @@ async def broadcast_save_message(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
+    from bot.utils.text import get_message_text_for_storage
+    
     text = None
     photo_file_id = None
     
     if message.photo:
-        # Фото с подписью (md_text сохраняет форматирование из Telegram UI)
         photo_file_id = message.photo[-1].file_id
-        text = message.md_text or ""
+        text = get_message_text_for_storage(message, 'markdown')
     elif message.text:
-        # Просто текст (md_text конвертирует entities в Markdown)
-        text = message.md_text
+        text = get_message_text_for_storage(message, 'markdown')
     else:
         await message.answer(
             "❌ Поддерживаются только текст или фото с подписью.",
@@ -533,31 +533,33 @@ async def broadcast_notify_text(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    from bot.utils.text import format_text_for_edit
+    
     await state.set_state(AdminStates.broadcast_waiting_notify_text)
     
     current_text = get_setting('notification_text', '')
     
-    text = (
-        "📝 *Текст уведомления*\n\n"
-        "Текущий текст:\n"
-        f"```\n{current_text}\n```\n\n"
-        "Отправьте новый текст.\n"
-        "Используйте `{days}` для вставки количества оставшихся дней, а `{keyname}` для имени ключа."
-    )
+    await state.update_data(editing_message=callback.message)
     
     await callback.message.edit_text(
-        text,
+        format_text_for_edit("Текст уведомления об истечении", current_text or "Не задано"),
         reply_markup=broadcast_notify_back_kb(),
-        parse_mode="Markdown"
+        parse_mode="MarkdownV2"
     )
     await callback.answer()
 
 
-@router.message(AdminStates.broadcast_waiting_notify_text)
+@router.message(AdminStates.broadcast_waiting_notify_text, ~F.text.startswith('/'))
 async def broadcast_save_notify_text(message: Message, state: FSMContext):
     """Сохраняет текст уведомления."""
     if not is_admin(message.from_user.id):
         return
+    
+    from bot.utils.text import get_message_text_for_storage, format_text_after_save
+    from bot.keyboards.admin import back_and_home_kb
+    
+    data = await state.get_data()
+    editing_message = data.get('editing_message')
     
     if not message.text:
         await message.answer(
@@ -566,27 +568,34 @@ async def broadcast_save_notify_text(message: Message, state: FSMContext):
         )
         return
     
-    set_setting('notification_text', message.text)
+    notify_text = get_message_text_for_storage(message, 'markdown')
+    set_setting('notification_text', notify_text)
     
-    await message.answer(
-        "✅ Текст уведомления сохранён!",
-        parse_mode="Markdown"
-    )
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except:
+        pass
     
-    # Возвращаемся в настройки уведомлений
-    await state.set_state(AdminStates.broadcast_menu)
+    await state.clear()
     
-    days = int(get_setting('notification_days', '3'))
-    
-    text = (
-        "⏰ *Автоуведомления*\n\n"
-        "Бот автоматически напоминает пользователям об истечении VPN-ключей.\n\n"
-        f"📅 Уведомлять за *{days}* дней до истечения\n"
-        "📝 Текст уведомления настраивается отдельно"
-    )
-    
-    await message.answer(
-        text,
-        reply_markup=broadcast_notifications_kb(days),
-        parse_mode="Markdown"
-    )
+    # Редактируем сообщение с новым текстом
+    if editing_message:
+        try:
+            await editing_message.edit_text(
+                format_text_after_save("Текст уведомления об истечении", notify_text),
+                reply_markup=back_and_home_kb("broadcast_notifications"),
+                parse_mode="MarkdownV2"
+            )
+        except:
+            await message.answer(
+                format_text_after_save("Текст уведомления об истечении", notify_text),
+                reply_markup=back_and_home_kb("broadcast_notifications"),
+                parse_mode="MarkdownV2"
+            )
+    else:
+        await message.answer(
+            format_text_after_save("Текст уведомления об истечении", notify_text),
+            reply_markup=back_and_home_kb("broadcast_notifications"),
+            parse_mode="MarkdownV2"
+        )

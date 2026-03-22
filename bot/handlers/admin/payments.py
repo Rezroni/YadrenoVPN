@@ -229,7 +229,9 @@ async def start_crypto_setup(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.crypto_setup_url)
 async def process_crypto_url(message: Message, state: FSMContext):
     """Обрабатывает ввод ссылки на товар."""
-    url = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    url = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     param = get_crypto_param_by_index(0)
@@ -296,7 +298,9 @@ async def process_crypto_url(message: Message, state: FSMContext):
 @router.message(AdminStates.crypto_setup_secret)
 async def process_crypto_secret(message: Message, state: FSMContext):
     """Обрабатывает ввод секретного ключа."""
-    secret = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    secret = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     param = get_crypto_param_by_index(1)
@@ -672,11 +676,13 @@ async def edit_crypto_value(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
+    from bot.utils.text import get_message_text_for_storage
+    
     data = await state.get_data()
     param_index = data.get('edit_crypto_param', 0)
     
     param = get_crypto_param_by_index(param_index)
-    value = message.text.strip()
+    value = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     if not param['validate'](value):
@@ -830,10 +836,12 @@ async def cards_mgmt_edit_token(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.cards_setup_token)
 async def cards_setup_token_value(message: Message, state: FSMContext):
     """Обрабатывает ввод токена ЮКасса."""
+    from bot.utils.text import get_message_text_for_storage
+    
     data = await state.get_data()
     last_menu_msg_id = data.get('last_menu_msg_id')
 
-    token = message.text.strip()
+    token = get_message_text_for_storage(message, 'plain')
     
     if len(token) < 20 or ':' not in token:
         await message.answer("❌ Неверный формат токена. Попробуйте ещё раз:")
@@ -996,7 +1004,9 @@ async def qr_edit_shop_id(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.qr_setup_shop_id)
 async def qr_setup_shop_id_handler(message: Message, state: FSMContext):
     """Обрабатывает ввод Shop ID."""
-    shop_id = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    shop_id = get_message_text_for_storage(message, 'plain')
 
     if not shop_id.isdigit() or len(shop_id) < 3:
         await message.answer("❌ Некорректный Shop ID. Должен быть числом (например, `123456`).",
@@ -1060,7 +1070,9 @@ async def qr_edit_secret(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.qr_setup_secret_key)
 async def qr_setup_secret_key_handler(message: Message, state: FSMContext):
     """Обрабатывает ввод Secret Key."""
-    secret_key = message.text.strip()
+    from bot.utils.text import get_message_text_for_storage
+    
+    secret_key = get_message_text_for_storage(message, 'plain')
 
     if len(secret_key) < 16:
         await message.answer("❌ Слишком короткий ключ. Попробуйте ещё раз.")

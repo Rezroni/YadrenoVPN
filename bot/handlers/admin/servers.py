@@ -323,8 +323,10 @@ async def process_add_step(message: Message, state: FSMContext):
     current_step = data.get('add_step', 1)
     server_data = data.get('server_data', {})
     
+    from bot.utils.text import get_message_text_for_storage
+    
     param = get_param_by_index(current_step - 1)
-    value = message.text.strip()
+    value = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     if not param['validate'](value):
@@ -667,8 +669,10 @@ async def edit_server_value(message: Message, state: FSMContext):
     server_id = data.get('server_id')
     current_param = data.get('edit_param', 0)
     
+    from bot.utils.text import get_message_text_for_storage
+    
     param = get_param_by_index(current_param)
-    value = message.text.strip()
+    value = get_message_text_for_storage(message, 'plain')
     
     # Валидация
     if not param['validate'](value):

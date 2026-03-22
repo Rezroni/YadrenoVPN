@@ -42,10 +42,17 @@ class AdminStates(StatesGroup):
     qr_setup_shop_id = State()       # Ввод Shop ID
     qr_setup_secret_key = State()    # Ввод Secret Key
 
+    # ========== Реферальная система ==========
+    referral_menu = State()          # Главное меню реферальной системы
+    referral_level_edit = State()    # Редактирование уровня
+    referral_conditions_text = State()  # Ввод текста условий
+    waiting_balance_amount = State()    # Ввод суммы баланса
+    waiting_coefficient = State()        # Ввод коэффициента
     
     # ========== Редактирование текстов ==========
     waiting_for_text = State()       # Ожидание ввода нового текста
     waiting_for_trial_text = State() # Ожидание ввода текста пробной подписки
+    waiting_for_link_button_name = State()  # Ожидание ввода названия кнопки-ссылки
     
     # ========== Управление тарифами ==========
     tariffs_list = State()           # Список тарифов

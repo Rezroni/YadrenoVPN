@@ -5,6 +5,7 @@
 - Callback от криптопроцессинга (bill1-...)
 - Оплату Telegram Stars
 - Продление ключей
+- Оплату с баланса
 """
 import logging
 from aiogram import Router, F
@@ -19,6 +20,573 @@ from config import ADMIN_IDS
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+def _format_price_compact(cents: int) -> str:
+    """Форматирование цены в компактном виде."""
+    if cents >= 10000:
+        return f"{cents // 100} ₽"
+    else:
+        return f"{cents / 100:.2f} ₽".replace(".", ",")
+
+
+def _is_cards_via_yookassa_direct() -> bool:
+    """
+    Проверяет, используется ли оплата картами через ЮKassa напрямую (webhook).
+    
+    Returns:
+        True если карты через ЮKassa напрямую (минимум 1₽),
+        False если через Telegram Payments API (минимум ~100₽)
+    """
+    from database.requests import get_setting
+    return get_setting('cards_via_yookassa_direct', '0') == '1'
+
+
+async def _show_balance_payment_screen(
+    callback: CallbackQuery,
+    state: FSMContext,
+    tariff_id: int,
+    user_internal_id: int,
+    key_id: int = None
+):
+    """
+    Показать экран оплаты с учётом баланса по ТЗ.
+    
+    Вызывается по кнопке «💰 Использовать баланс».
+    
+    Расчёт:
+        balance_to_deduct = min(balance, price)
+        remaining_cents = price - balance_to_deduct
+    
+    Сохраняет в FSM state: balance_to_deduct, tariff_price_cents, tariff_id, key_id
+    """
+    from database.requests import (
+        get_tariff_by_id, get_user_balance,
+        is_cards_enabled, is_yookassa_qr_configured
+    )
+    from bot.keyboards.user import balance_payment_kb
+    
+    tariff = get_tariff_by_id(tariff_id)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    tariff_price_cents = int(tariff.get('price_rub', 0) * 100)
+    if tariff_price_cents <= 0:
+        await callback.answer("❌ Ошибка: цена тарифа не задана", show_alert=True)
+        return
+    
+    balance_cents = get_user_balance(user_internal_id)
+    balance_to_deduct = min(balance_cents, tariff_price_cents)
+    remaining_cents = max(0, tariff_price_cents - balance_to_deduct)
+    
+    await state.update_data(
+        balance_to_deduct=balance_to_deduct,
+        tariff_price_cents=tariff_price_cents,
+        tariff_id=tariff_id,
+        key_id=key_id
+    )
+    
+    price_str = _format_price_compact(tariff_price_cents)
+    balance_str = _format_price_compact(balance_cents)
+    deduct_str = _format_price_compact(balance_to_deduct)
+    remaining_str = _format_price_compact(remaining_cents)
+    
+    text = (
+        f"💳 *Оплата тарифа «{escape_md(tariff['name'])}»*\n\n"
+        f"💰 Сумма: {price_str}\n"
+        f"💰 Ваш баланс: {balance_str}\n\n"
+        f"✅ С баланса будет списано: {deduct_str}\n"
+        f"💳 К оплате: {remaining_str}"
+    )
+    
+    cards_enabled = is_cards_enabled()
+    yookassa_qr_enabled = is_yookassa_qr_configured()
+    cards_via_yookassa_direct = _is_cards_via_yookassa_direct()
+    
+    available_methods = []
+    if yookassa_qr_enabled:
+        available_methods.append('qr')
+    if cards_enabled:
+        if cards_via_yookassa_direct:
+            available_methods.append('card')
+        elif remaining_cents >= 10000:
+            available_methods.append('card')
+    
+    if remaining_cents > 0 and not available_methods:
+        text += (
+            "\n\n💡 *Для доплаты этой суммы нет подходящего способа оплаты.*\n"
+            "Поднакопите ещё немного на реферальном балансе\n"
+            "или оплатите тариф без использования баланса."
+        )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=balance_payment_kb(
+            tariff_id=tariff_id,
+            key_id=key_id,
+            balance_cents=balance_cents,
+            tariff_price_cents=tariff_price_cents,
+            balance_to_deduct=balance_to_deduct,
+            remaining_cents=remaining_cents,
+            cards_enabled=cards_enabled,
+            yookassa_qr_enabled=yookassa_qr_enabled,
+            cards_via_yookassa_direct=cards_via_yookassa_direct
+        ),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+# ============================================================================
+# КНОПКА «ИСПОЛЬЗОВАТЬ БАЛАНС» — ВЫБОР ТАРИФА
+# ============================================================================
+
+@router.callback_query(F.data == "pay_use_balance")
+async def pay_use_balance_buy_handler(callback: CallbackQuery, state: FSMContext):
+    """Выбор тарифа для оплаты с баланса (новый ключ)."""
+    from database.requests import (
+        get_all_tariffs, get_user_internal_id,
+        is_referral_enabled, get_referral_reward_type, get_user_balance
+    )
+    from bot.keyboards.user import tariff_select_kb
+    from bot.keyboards.admin import home_only_kb
+    
+    telegram_id = callback.from_user.id
+    user_id = get_user_internal_id(telegram_id)
+    
+    if not is_referral_enabled() or get_referral_reward_type() != 'balance':
+        await callback.answer("❌ Оплата с баланса недоступна", show_alert=True)
+        return
+    
+    balance_cents = get_user_balance(user_id) if user_id else 0
+    if balance_cents <= 0:
+        await callback.answer("❌ Недостаточно средств на балансе", show_alert=True)
+        return
+    
+    tariffs = get_all_tariffs(include_hidden=False)
+    rub_tariffs = [t for t in tariffs if t.get('price_rub') and t['price_rub'] > 0]
+    
+    if not rub_tariffs:
+        await callback.message.edit_text(
+            "💰 *Оплата с баланса*\n\n"
+            "😔 Нет доступных тарифов с ценой в рублях.",
+            reply_markup=home_only_kb(),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "💰 *Оплата с баланса*\n\n"
+        f"Ваш баланс: *{_format_price_compact(balance_cents)}*\n\n"
+        "Выберите тариф:",
+        reply_markup=tariff_select_kb(rub_tariffs, back_callback="buy_key", is_balance=True),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pay_use_balance:"))
+async def pay_use_balance_renew_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Обработка кнопки «Использовать баланс» для продления.
+    Callback: pay_use_balance:{key_id}
+    """
+    from database.requests import (
+        get_user_internal_id, get_key_details_for_user,
+        is_referral_enabled, get_referral_reward_type, get_user_balance,
+        get_all_tariffs
+    )
+    from bot.keyboards.user import renew_tariff_select_kb
+    from bot.keyboards.admin import home_only_kb
+    
+    key_id = int(callback.data.split(":")[1])
+    telegram_id = callback.from_user.id
+    user_id = get_user_internal_id(telegram_id)
+    
+    key = get_key_details_for_user(key_id, telegram_id)
+    if not key:
+        await callback.answer("❌ Ключ не найден", show_alert=True)
+        return
+    
+    if not is_referral_enabled() or get_referral_reward_type() != 'balance':
+        await callback.answer("❌ Оплата с баланса недоступна", show_alert=True)
+        return
+    
+    balance_cents = get_user_balance(user_id) if user_id else 0
+    if balance_cents <= 0:
+        await callback.answer("❌ Недостаточно средств на балансе", show_alert=True)
+        return
+    
+    tariffs = get_all_tariffs(include_hidden=False)
+    rub_tariffs = [t for t in tariffs if t.get('price_rub') and t['price_rub'] > 0]
+    
+    if not rub_tariffs:
+        await callback.message.edit_text(
+            "💰 *Оплата с баланса*\n\n"
+            "😔 Нет доступных тарифов с ценой в рублях.",
+            reply_markup=home_only_kb(),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        f"💰 *Оплата с баланса*\n\n"
+        f"🔑 Ключ: *{key['display_name']}*\n"
+        f"Ваш баланс: *{_format_price_compact(balance_cents)}*\n\n"
+        "Выберите тариф:",
+        reply_markup=renew_tariff_select_kb(rub_tariffs, key_id, is_balance=True),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("balance_pay:"))
+async def balance_pay_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Показ экрана оплаты с балансом после выбора тарифа.
+    Callback: balance_pay:{tariff_id} или balance_pay:{tariff_id}:{key_id}
+    """
+    from database.requests import get_user_internal_id, get_tariff_by_id
+    
+    parts = callback.data.split(":")
+    tariff_id = int(parts[1])
+    key_id = int(parts[2]) if len(parts) > 2 and parts[2] != '0' else None
+    
+    user_id = get_user_internal_id(callback.from_user.id)
+    if not user_id:
+        await callback.answer("❌ Ошибка пользователя", show_alert=True)
+        return
+    
+    tariff = get_tariff_by_id(tariff_id)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    await _show_balance_payment_screen(callback, state, tariff_id, user_id, key_id=key_id)
+
+
+# ============================================================================
+# ОПЛАТА С БАЛАНСА (ПОЛНАЯ)
+# ============================================================================
+
+@router.callback_query(F.data.startswith("pay_with_balance:"))
+async def pay_with_balance_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Полная оплата с баланса (когда remaining_cents == 0).
+    Атомарная операция: списать + выдать ключ.
+    
+    При оплате балансом реферальные вознаграждения НЕ начисляются.
+    """
+    from database.requests import (
+        get_user_internal_id, get_user_balance, deduct_from_balance,
+        get_tariff_by_id, get_or_create_user, create_initial_vpn_key,
+        extend_vpn_key
+    )
+    from bot.services.user_locks import user_locks
+    from bot.services.vpn_api import reset_key_traffic_if_active, extend_key_on_server
+    
+    data = await state.get_data()
+    balance_to_deduct = data.get('balance_to_deduct', 0)
+    tariff_price_cents = data.get('tariff_price_cents', 0)
+    tariff_id = data.get('tariff_id')
+    key_id = data.get('key_id')
+    
+    parts = callback.data.split(":")
+    if not tariff_id:
+        tariff_id = int(parts[1]) if len(parts) > 1 else None
+    if not key_id:
+        key_id = int(parts[2]) if len(parts) > 2 and parts[2] else None
+    
+    if not tariff_id:
+        await callback.answer("❌ Ошибка: тариф не определён", show_alert=True)
+        return
+    
+    telegram_id = callback.from_user.id
+    user, _ = get_or_create_user(telegram_id, callback.from_user.username)
+    user_internal_id = user['id']
+    
+    tariff = get_tariff_by_id(tariff_id)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    days = tariff['duration_days']
+    
+    async with user_locks[user_internal_id]:
+        current_balance = get_user_balance(user_internal_id)
+        
+        if current_balance < tariff_price_cents:
+            await callback.answer("❌ Недостаточно средств на балансе", show_alert=True)
+            return
+        
+        actual_deduct = min(current_balance, tariff_price_cents)
+        deduct_from_balance(user_internal_id, actual_deduct)
+        
+        if key_id:
+            extend_vpn_key(key_id, days)
+            await reset_key_traffic_if_active(key_id)
+            await extend_key_on_server(key_id, days)
+            logger.info(f"Ключ {key_id} продлён на {days} дней за баланс {actual_deduct} коп")
+        else:
+            create_initial_vpn_key(user_internal_id, tariff_id, days)
+            logger.info(f"Создан черновик ключа для user {user_internal_id} за баланс {actual_deduct} коп")
+    
+    await state.update_data(balance_to_deduct=0)
+    
+    def format_price_compact(cents: int) -> str:
+        if cents >= 10000:
+            return f"{cents // 100} ₽"
+        else:
+            return f"{cents / 100:.2f} ₽".replace(".", ",")
+    
+    price_str = format_price_compact(actual_deduct)
+    
+    await callback.message.edit_text(
+        f"✅ *Оплата успешно завершена!*\n\n"
+        f"С вашего баланса списано {price_str}\n"
+        f"Ключ активирован.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardBuilder().row(
+            InlineKeyboardButton(text="🈴 На главную", callback_data="start")
+        ).as_markup()
+    )
+    await callback.answer()
+
+
+# ============================================================================
+# ЧАСТИЧНАЯ ОПЛАТА С БАЛАНСОМ (ДОПЛАТА КАРТОЙ)
+# ============================================================================
+
+@router.callback_query(F.data.startswith("pay_card_balance:"))
+async def pay_card_balance_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Частичная оплата: баланс + карта.
+    
+    Берёт данные из FSM state: balance_to_deduct, remaining_cents, tariff_id, key_id
+    Создаёт инвойс на remaining_cents (не на полную цену тарифа!)
+    """
+    from aiogram.types import LabeledPrice
+    from database.requests import (
+        get_tariff_by_id, get_user_internal_id, get_user_balance,
+        create_pending_order, get_setting
+    )
+    from aiogram.exceptions import TelegramBadRequest
+    
+    data = await state.get_data()
+    balance_to_deduct = data.get('balance_to_deduct', 0)
+    tariff_price_cents = data.get('tariff_price_cents', 0)
+    tariff_id = data.get('tariff_id')
+    key_id = data.get('key_id')
+    
+    parts = callback.data.split(":")
+    if not tariff_id:
+        tariff_id = int(parts[1]) if len(parts) > 1 else None
+    if not key_id:
+        key_id = int(parts[2]) if len(parts) > 2 and parts[2] != '0' else None
+    
+    if not tariff_id:
+        await callback.answer("❌ Ошибка: тариф не определён", show_alert=True)
+        return
+    
+    tariff = get_tariff_by_id(tariff_id)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    provider_token = get_setting('cards_provider_token', '')
+    if not provider_token:
+        await callback.answer("❌ Провайдер платежей не настроен", show_alert=True)
+        return
+    
+    user_id = get_user_internal_id(callback.from_user.id)
+    if not user_id:
+        await callback.answer("❌ Ошибка пользователя", show_alert=True)
+        return
+    
+    if not tariff_price_cents:
+        tariff_price_cents = int(tariff.get('price_rub', 0) * 100)
+    
+    if not balance_to_deduct:
+        balance_cents = get_user_balance(user_id)
+        balance_to_deduct = min(balance_cents, tariff_price_cents)
+    
+    remaining_cents = tariff_price_cents - balance_to_deduct
+    
+    await state.update_data(
+        balance_to_deduct=balance_to_deduct,
+        tariff_price_cents=tariff_price_cents,
+        tariff_id=tariff_id,
+        key_id=key_id,
+        remaining_cents=remaining_cents
+    )
+    
+    _, order_id = create_pending_order(
+        user_id=user_id,
+        tariff_id=tariff_id,
+        payment_type='cards',
+        vpn_key_id=key_id
+    )
+    
+    price_rub = remaining_cents / 100
+    price_kopecks = remaining_cents
+    
+    try:
+        bot_info = await callback.bot.get_me()
+        bot_name = bot_info.first_name
+        
+        back_cb = f"key_renew:{key_id}" if key_id else "buy_key"
+        await callback.message.answer_invoice(
+            title=bot_name,
+            description=f"Оплата тарифа «{tariff['name']}» ({tariff['duration_days']} дн.).",
+            payload=f"vpn_key:{order_id}",
+            provider_token=provider_token,
+            currency="RUB",
+            prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)],
+            reply_markup=InlineKeyboardBuilder().row(
+                InlineKeyboardButton(text=f"💳 Оплатить {price_rub:.2f} ₽", pay=True)
+            ).row(
+                InlineKeyboardButton(text="❌ Отмена", callback_data=back_cb)
+            ).as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "CURRENCY_TOTAL_AMOUNT_INVALID" in str(e):
+            logger.warning(f"Ошибка платежа (CARDS): Неправильная сумма. Тариф: ID {tariff['id']}")
+            await callback.answer("❌ Ошибка платежной системы. Сумма тарифа меньше допустимого лимита.", show_alert=True)
+            return
+        logger.exception("Ошибка при отправке инвойса картой.")
+        raise e
+    
+    await callback.message.delete()
+    await callback.answer()
+
+
+# ============================================================================
+# ЧАСТИЧНАЯ ОПЛАТА С БАЛАНСОМ (ДОПЛАТА QR)
+# ============================================================================
+
+@router.callback_query(F.data.startswith("pay_qr_balance:"))
+async def pay_qr_balance_handler(callback: CallbackQuery, state: FSMContext):
+    """
+    Частичная оплата: баланс + QR (СБП).
+    
+    Берёт данные из FSM state: balance_to_deduct, remaining_cents, tariff_id, key_id
+    Создаёт инвойс на remaining_cents / 100 рублей (ЮKassa принимает рубли)
+    """
+    from database.requests import (
+        get_tariff_by_id, get_user_internal_id, get_user_balance,
+        create_pending_order, save_yookassa_payment_id
+    )
+    from bot.services.billing import create_yookassa_qr_payment
+    from bot.keyboards.user import yookassa_qr_kb
+    from bot.keyboards.admin import home_only_kb
+    from aiogram.types import BufferedInputFile
+    
+    data = await state.get_data()
+    balance_to_deduct = data.get('balance_to_deduct', 0)
+    tariff_price_cents = data.get('tariff_price_cents', 0)
+    tariff_id = data.get('tariff_id')
+    key_id = data.get('key_id')
+    
+    parts = callback.data.split(":")
+    if not tariff_id:
+        tariff_id = int(parts[1]) if len(parts) > 1 else None
+    if not key_id:
+        key_id = int(parts[2]) if len(parts) > 2 and parts[2] != '0' else None
+    
+    if not tariff_id:
+        await callback.answer("❌ Ошибка: тариф не определён", show_alert=True)
+        return
+    
+    tariff = get_tariff_by_id(tariff_id)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    user_id = get_user_internal_id(callback.from_user.id)
+    if not user_id:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    if not tariff_price_cents:
+        tariff_price_cents = int(tariff.get('price_rub', 0) * 100)
+    
+    if not balance_to_deduct:
+        balance_cents = get_user_balance(user_id)
+        balance_to_deduct = min(balance_cents, tariff_price_cents)
+    
+    remaining_cents = tariff_price_cents - balance_to_deduct
+    remaining_rub = remaining_cents / 100
+    
+    await state.update_data(
+        balance_to_deduct=balance_to_deduct,
+        tariff_price_cents=tariff_price_cents,
+        tariff_id=tariff_id,
+        key_id=key_id,
+        remaining_cents=remaining_cents
+    )
+    
+    _, order_id = create_pending_order(
+        user_id=user_id,
+        tariff_id=tariff_id,
+        payment_type='yookassa_qr',
+        vpn_key_id=key_id
+    )
+    
+    await callback.message.edit_text("⏳ Создаём QR-код для оплаты...")
+    
+    try:
+        description = f"Покупка «{tariff['name']}» — {tariff['duration_days']} дней"
+        result = await create_yookassa_qr_payment(
+            amount_rub=remaining_rub,
+            order_id=order_id,
+            description=description
+        )
+        
+        save_yookassa_payment_id(order_id, result['yookassa_payment_id'])
+        
+        qr_image_data = result.get('qr_image_data')
+        qr_url = result.get('qr_url', '')
+        if not qr_image_data or not qr_url:
+            await callback.message.edit_text(
+                "❌ ЮКасса не вернула данные для оплаты. Попробуйте позже.",
+                reply_markup=home_only_kb(),
+                parse_mode="Markdown"
+            )
+            return
+        
+        text = (
+            f"📱 *QR-код для оплаты*\n\n"
+            f"💳 *Тариф:* {tariff['name']}\n"
+            f"💰 *Сумма:* {remaining_rub:.2f} ₽\n"
+            f"⏳ *Срок:* {tariff['duration_days']} дней\n\n"
+            f"Отсканируйте QR-код банковским приложением (СБП) или перейдите по [ссылке на оплату]({qr_url}).\n\n"
+            "_После оплаты нажмите «✅ Я оплатил»._"
+        )
+        
+        photo = BufferedInputFile(qr_image_data, filename="qr.png")
+        
+        back_cb = f"key_renew:{key_id}" if key_id else "buy_key"
+        
+        await callback.message.delete()
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=text,
+            reply_markup=yookassa_qr_kb(order_id, back_callback=back_cb),
+            parse_mode="Markdown"
+        )
+        
+    except (ValueError, RuntimeError) as e:
+        logger.error(f"Ошибка создания QR ЮКасса: {e}")
+        await callback.message.edit_text(
+            f"❌ *Ошибка создания QR*\n\n_{e}_\n\nПопробуйте другой способ оплаты.",
+            reply_markup=home_only_kb(),
+            parse_mode="Markdown"
+        )
+    
+    await callback.answer()
 
 
 # ============================================================================
@@ -127,13 +695,10 @@ async def renew_stars_invoice(callback: CallbackQuery):
     if not user_id:
         return
 
-    # Логика создания/обновления ордера
     if order_id:
-         # Переиспользуем существующий
          update_order_tariff(order_id, tariff_id)
          update_payment_type(order_id, 'stars')
     else:
-         # Создаем новый
          _, order_id = create_pending_order(
             user_id=user_id,
             tariff_id=tariff_id,
@@ -141,8 +706,6 @@ async def renew_stars_invoice(callback: CallbackQuery):
             vpn_key_id=key_id
         )
     
-    # Отправляем invoice
-    # payload содержит order_id для идентификации платежа
     bot_info = await callback.bot.get_me()
     bot_name = bot_info.first_name
     
@@ -159,7 +722,6 @@ async def renew_stars_invoice(callback: CallbackQuery):
         ).as_markup()
     )
     
-    # Удаляем предыдущее сообщение
     await callback.message.delete()
     await callback.answer()
 
@@ -189,7 +751,7 @@ async def renew_crypto_invoice(callback: CallbackQuery):
     if not tariff or not key:
         await callback.answer("Ошибка тарифа или ключа", show_alert=True)
         return
-        
+    
     user_id = get_user_internal_id(callback.from_user.id)
     if not user_id:
         return
@@ -258,15 +820,30 @@ async def pre_checkout_handler(pre_checkout: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def successful_payment_handler(message: Message, state: FSMContext):
-    """Обработка успешной оплаты Stars."""
-    from bot.services.billing import process_payment_order
+    """
+    Обработка успешной оплаты Stars или Cards.
+    
+    При частичной оплате с балансом:
+    - Списывает баланс под user_locks
+    - process_referral_reward получает только внешнюю сумму (remaining_cents)
+    - Сбрасывает balance_to_deduct в 0
+    """
+    from bot.services.billing import process_payment_order, process_referral_reward
+    from database.requests import get_user_balance, deduct_from_balance
+    from bot.services.user_locks import user_locks
     
     payment = message.successful_payment
     payload = payment.invoice_payload
+    currency = payment.currency
     
-    logger.info(f"Успешная оплата Stars: {payload}, charge_id={payment.telegram_payment_charge_id}")
+    payment_type = 'stars' if currency == 'XTR' else 'cards'
     
-    # Парсим payload
+    logger.info(f"Успешная оплата {payment_type}: {payload}, charge_id={payment.telegram_payment_charge_id}")
+    
+    data = await state.get_data()
+    balance_to_deduct = data.get('balance_to_deduct', 0)
+    remaining_cents = data.get('remaining_cents', 0)
+    
     if payload.startswith("renew:"):
         order_id = payload.split(":")[1]
     elif payload.startswith("vpn_key:"):
@@ -274,12 +851,30 @@ async def successful_payment_handler(message: Message, state: FSMContext):
     else:
         order_id = payload
     
-    # Обрабатываем платеж через единую функцию
     try:
         success, text, order = await process_payment_order(order_id)
         
-        # Завершаем UI
         if success and order:
+            user_internal_id = order['user_id']
+            days = order.get('period_days') or order.get('duration_days') or 30
+            
+            if balance_to_deduct > 0:
+                async with user_locks[user_internal_id]:
+                    current_balance = get_user_balance(user_internal_id)
+                    actual_deduct = min(balance_to_deduct, current_balance)
+                    if actual_deduct > 0:
+                        deduct_from_balance(user_internal_id, actual_deduct)
+                        logger.info(f"Списано {actual_deduct} коп с баланса user {user_internal_id} при частичной оплате")
+            
+            await state.update_data(balance_to_deduct=0, remaining_cents=0)
+            
+            if payment_type == 'stars':
+                amount = payment.total_amount
+            else:
+                amount = payment.total_amount
+            
+            await process_referral_reward(user_internal_id, days, amount, payment_type)
+            
             await finalize_payment_ui(message, state, text, order, user_id=message.from_user.id)
         else:
              from bot.keyboards.admin import home_only_kb
@@ -298,7 +893,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
                 parse_mode="Markdown"
             )
         else:
-            logger.exception(f"Ошибка обработки Stars платежа: {e}")
+            logger.exception(f"Ошибка обработки {payment_type} платежа: {e}")
             await message.answer("❌ Произошла ошибка при обработке платежа.", parse_mode="Markdown")
 
 
@@ -657,7 +1252,10 @@ async def pay_cards_select_tariff(callback: CallbackQuery):
 async def pay_cards_invoice(callback: CallbackQuery):
     """Создание инвойса для оплаты Картой (Новый ключ)."""
     from aiogram.types import LabeledPrice
-    from database.requests import get_tariff_by_id, get_user_internal_id, create_pending_order, update_order_tariff, get_setting
+    from database.requests import (
+        get_tariff_by_id, get_user_internal_id, create_pending_order,
+        update_order_tariff, get_setting
+    )
     
     parts = callback.data.split(":")
     tariff_id = int(parts[1])
@@ -667,19 +1265,19 @@ async def pay_cards_invoice(callback: CallbackQuery):
     if not tariff:
         await callback.answer("❌ Тариф не найден", show_alert=True)
         return
-        
+    
+    user_id = get_user_internal_id(callback.from_user.id)
+    
     provider_token = get_setting('cards_provider_token', '')
     if not provider_token:
         await callback.answer("❌ Провайдер платежей не настроен", show_alert=True)
         return
-        
         
     days = tariff['duration_days']
         
     if order_id:
         update_order_tariff(order_id, tariff_id, payment_type='cards')
     else:
-        user_id = get_user_internal_id(callback.from_user.id)
         if not user_id:
             await callback.answer("❌ Ошибка пользователя", show_alert=True)
             return
@@ -783,13 +1381,14 @@ async def renew_cards_invoice(callback: CallbackQuery):
     if not tariff or not key:
         await callback.answer("Ошибка тарифа или ключа", show_alert=True)
         return
-        
+    
+    user_id = get_user_internal_id(callback.from_user.id)
+    
     provider_token = get_setting('cards_provider_token', '')
     if not provider_token:
         await callback.answer("❌ Провайдер платежей не настроен", show_alert=True)
         return
         
-    user_id = get_user_internal_id(callback.from_user.id)
     if not user_id:
         return
 
@@ -809,10 +1408,6 @@ async def renew_cards_invoice(callback: CallbackQuery):
         await callback.answer("❌ Ошибка: цена тарифа в рублях не задана.", show_alert=True)
         return
         
-    # Формируем клавиатуру оплаты
-    # У Telegram Payments кнопка "Оплатить X RUB" добавляется автоматически, 
-    # если не передать reply_markup. Но если мы хотим отмену, нужно
-    # передать pay=True первой кнопкой.
     from aiogram.exceptions import TelegramBadRequest
 
     try:
@@ -974,10 +1569,12 @@ async def check_yookassa_payment(callback: CallbackQuery, state: FSMContext):
     При успехе — запускает процесс создания ключа.
     """
     from database.requests import (
-        find_order_by_order_id, is_order_already_paid, update_payment_type
+        find_order_by_order_id, is_order_already_paid, update_payment_type,
+        get_user_balance, deduct_from_balance
     )
-    from bot.services.billing import check_yookassa_payment_status, process_payment_order
+    from bot.services.billing import check_yookassa_payment_status, process_payment_order, process_referral_reward
     from bot.keyboards.admin import home_only_kb
+    from bot.services.user_locks import user_locks
 
     order_id = callback.data.split(":", 1)[1]
 
@@ -1015,9 +1612,28 @@ async def check_yookassa_payment(callback: CallbackQuery, state: FSMContext):
     if status == 'succeeded':
         update_payment_type(order_id, 'yookassa_qr')
 
+        state_data = await state.get_data()
+        balance_to_deduct = state_data.get('balance_to_deduct', 0)
+        remaining_cents = state_data.get('remaining_cents', 0)
+
         try:
             success, text, updated_order = await process_payment_order(order_id)
             if success and updated_order:
+                user_internal_id = updated_order['user_id']
+                days = updated_order.get('period_days') or updated_order.get('duration_days') or 30
+                
+                if balance_to_deduct > 0:
+                    async with user_locks[user_internal_id]:
+                        current_balance = get_user_balance(user_internal_id)
+                        actual_deduct = min(balance_to_deduct, current_balance)
+                        if actual_deduct > 0:
+                            deduct_from_balance(user_internal_id, actual_deduct)
+                            logger.info(f"Списано {actual_deduct} коп с баланса user {user_internal_id} при частичной QR-оплате")
+                
+                await state.update_data(balance_to_deduct=0, remaining_cents=0)
+                
+                await process_referral_reward(user_internal_id, days, remaining_cents, 'yookassa_qr')
+                
                 try:
                     await callback.message.delete()
                 except Exception:
@@ -1051,7 +1667,6 @@ async def check_yookassa_payment(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown"
         )
     else:
-        # pending / waiting_for_capture / etc.
         await callback.message.answer(
             "⏳ *Платёж ещё не поступил*\n\n"
             "Оплатите QR-код и нажмите «✅ Я оплатил» снова.\n\n"

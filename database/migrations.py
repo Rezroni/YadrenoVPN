@@ -7,11 +7,13 @@
 import sqlite3
 import logging
 from .connection import get_db
+import secrets
+import string
 
 logger = logging.getLogger(__name__)
 
 # Текущая версия схемы БД
-LATEST_VERSION = 9
+LATEST_VERSION = 12
 
 
 def get_current_version() -> int:
@@ -526,6 +528,197 @@ def migration_9(conn: sqlite3.Connection) -> None:
 
     logger.info("Миграция v9 применена")
 
+
+def migration_10(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v10: Текст перед оплатой (отказ от ответственности).
+    
+    Добавляет настройку prepayment_text для хранения текста,
+    который показывается пользователю перед выбором способа оплаты.
+    Текст хранится в формате MarkdownV2 с экранированием.
+    """
+    logger.info("Применение миграции v10 (Текст перед оплатой)...")
+    
+    default_prepayment_text = (
+        "💳 *Купить ключ*\n\n"
+        "🔐 *Что вы получаете:*\n"
+        "• Доступ к нескольким серверам и протоколам\n"
+        "• 1 ключ \\= 1 устройство \\(одновременное подключение\\)\n"
+        "• Лимит трафика: до 1 ТБ в месяц \\(сброс каждые 30 дней\\)\n\n"
+        "⚠️ *Важно знать:*\n"
+        "• Средства не возвращаются — услуга считается оказанной в момент получения ключа\n"
+        "• Мы не даём никаких гарантий бесперебойной работы сервиса в будущем\n"
+        "• Мы не можем гарантировать, что данная технология останется рабочей\n\n"
+        "_Приобретая ключ, вы соглашаетесь с этими условиями\\._"
+    )
+
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        ('prepayment_text', default_prepayment_text)
+    )
+    
+    logger.info("Миграция v10 применена")
+
+
+
+
+def migration_11(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v11: Реферальная система.
+    
+    Изменения:
+    - Новые поля в users: referral_code, referred_by, personal_balance, referral_coefficient
+    - Новая таблица referral_levels (до 3 уровней с процентами)
+    - Новая таблица referral_stats (статистика по рефералам)
+    - Новая таблица exchange_rates (курсы валют)
+    - Новые настройки: referral_enabled, referral_reward_type, referral_conditions_text
+    - Генерация реферальных кодов для существующих пользователей
+    """
+    logger.info("Применение миграции v11 (Реферальная система)...")
+    
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN referral_code TEXT")
+        logger.info("Колонка referral_code добавлена в таблицу users")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            logger.info("Колонка referral_code уже существует")
+        else:
+            raise
+    
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)")
+        logger.info("Колонка referred_by добавлена в таблицу users")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            logger.info("Колонка referred_by уже существует")
+        else:
+            raise
+    
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN personal_balance INTEGER DEFAULT 0")
+        logger.info("Колонка personal_balance добавлена в таблицу users")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            logger.info("Колонка personal_balance уже существует")
+        else:
+            raise
+    
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN referral_coefficient REAL DEFAULT 1.0")
+        logger.info("Колонка referral_coefficient добавлена в таблицу users")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            logger.info("Колонка referral_coefficient уже существует")
+        else:
+            raise
+    
+    conn.commit()
+    
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS referral_levels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            level_number INTEGER NOT NULL UNIQUE,
+            percent INTEGER NOT NULL,
+            enabled INTEGER DEFAULT 1
+        )
+    """)
+    
+    conn.execute(
+        "INSERT OR IGNORE INTO referral_levels (level_number, percent, enabled) VALUES (1, 10, 1)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO referral_levels (level_number, percent, enabled) VALUES (2, 5, 0)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO referral_levels (level_number, percent, enabled) VALUES (3, 2, 0)"
+    )
+    
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS referral_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_id INTEGER NOT NULL,
+            referral_id INTEGER NOT NULL,
+            level INTEGER NOT NULL,
+            total_payments_count INTEGER DEFAULT 0,
+            total_reward_cents INTEGER DEFAULT 0,
+            total_reward_days INTEGER DEFAULT 0,
+            FOREIGN KEY (referrer_id) REFERENCES users(id),
+            FOREIGN KEY (referral_id) REFERENCES users(id),
+            UNIQUE (referrer_id, referral_id, level)
+        )
+    """)
+    
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS exchange_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            currency_pair TEXT NOT NULL UNIQUE,
+            rate INTEGER NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    conn.execute(
+        "INSERT OR IGNORE INTO exchange_rates (currency_pair, rate) VALUES ('USD_RUB', 9500)"
+    )
+    
+    referral_settings = [
+        ('referral_enabled', '0'),
+        ('referral_reward_type', 'days'),
+        ('referral_conditions_text', ''),
+    ]
+    for key, value in referral_settings:
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            (key, value)
+        )
+    
+    cursor = conn.execute("SELECT id FROM users WHERE referral_code IS NULL")
+    users_without_code = [row['id'] for row in cursor.fetchall()]
+    
+    alphabet = string.ascii_letters + string.digits
+    for user_id in users_without_code:
+        code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        attempts = 0
+        while attempts < 100:
+            cursor = conn.execute("SELECT 1 FROM users WHERE referral_code = ?", (code,))
+            if not cursor.fetchone():
+                break
+            code = ''.join(secrets.choice(alphabet) for _ in range(8))
+            attempts += 1
+        
+        conn.execute("UPDATE users SET referral_code = ? WHERE id = ?", (code, user_id))
+    
+    logger.info(f"Сгенерированы реферальные коды для {len(users_without_code)} пользователей")
+    logger.info("Миграция v11 применена")
+
+
+def migration_12(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v12: Настройки кнопок-ссылок в справке.
+    
+    Добавляет настройки для:
+    - news_hidden: скрыта ли кнопка "Новости"
+    - support_hidden: скрыта ли кнопка "Поддержка"
+    - news_button_name: кастомное название кнопки "Новости"
+    - support_button_name: кастомное название кнопки "Поддержка"
+    """
+    logger.info("Применение миграции v12 (Настройки кнопок-ссылок)...")
+    
+    link_button_settings = [
+        ('news_hidden', '0'),
+        ('support_hidden', '0'),
+        ('news_button_name', 'Новости'),
+        ('support_button_name', 'Поддержка'),
+    ]
+    for key, value in link_button_settings:
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            (key, value)
+        )
+    
+    logger.info("Миграция v12 применена")
+
+
 MIGRATIONS = {
     1: migration_1,
     2: migration_2,
@@ -536,6 +729,9 @@ MIGRATIONS = {
     7: migration_7,
     8: migration_8,
     9: migration_9,
+    10: migration_10,
+    11: migration_11,
+    12: migration_12,
 }
 
 

@@ -173,14 +173,12 @@ def pull_updates() -> Tuple[bool, str]:
     Выполняет git pull для обновления кода.
     
     Returns:
-        (success, message)
+        (success, message) - сообщение содержит информацию о коммите
     """
-    # Проверяем на наличие локальных изменений
     success, status = run_git_command(['status', '--porcelain'])
     if success and status.strip():
         return False, "❌ Есть локальные изменения. Сделайте commit или stash перед обновлением."
     
-    # Выполняем pull
     success, output = run_git_command(['pull', 'origin'], timeout=120)
     
     if not success:
@@ -188,7 +186,8 @@ def pull_updates() -> Tuple[bool, str]:
             return False, "❌ Конфликт слияния. Требуется ручное разрешение."
         return False, f"❌ Ошибка обновления:\n{output}"
     
-    return True, f"✅ Обновление успешно!\n\n{output}"
+    commit_info = get_last_commit_info('HEAD')
+    return True, f"✅ Обновление успешно!\n\n🔹 Последний коммит:\n```\n{commit_info}\n```"
 
 
 def get_last_commit_info(revision: str = 'HEAD') -> str:

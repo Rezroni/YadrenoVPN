@@ -201,7 +201,16 @@ def toggle_server_active(server_id: int) -> Optional[bool]:
 # ПОЛЬЗОВАТЕЛИ (users)
 # ============================================================================
 
-def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
+import secrets
+import string
+
+def _generate_referral_code() -> str:
+    """Генерация уникального 8-символьного кода (A-Z, a-z, 0-9)."""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(8))
+
+
+def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> tuple[Dict[str, Any], bool]:
     """
     Получает или создаёт пользователя.
     
@@ -210,7 +219,9 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> Dict
         username: @username (опционально)
         
     Returns:
-        Словарь с данными пользователя
+        Кортеж (user_dict, is_new):
+        - user_dict: словарь с данными пользователя
+        - is_new: True если пользователь был создан, False если уже существовал
     """
     with get_db() as conn:
         cursor = conn.execute(
@@ -220,27 +231,38 @@ def get_or_create_user(telegram_id: int, username: Optional[str] = None) -> Dict
         row = cursor.fetchone()
         
         if row:
-            # Обновляем username если изменился
             if username and row['username'] != username:
                 conn.execute(
                     "UPDATE users SET username = ? WHERE telegram_id = ?",
                     (username, telegram_id)
                 )
-            return dict(row)
+            return dict(row), False
         
-        # Создаём нового пользователя
+        referral_code = _generate_referral_code()
+        attempts = 0
+        while attempts < 100:
+            cursor = conn.execute("SELECT 1 FROM users WHERE referral_code = ?", (referral_code,))
+            if not cursor.fetchone():
+                break
+            referral_code = _generate_referral_code()
+            attempts += 1
+        
         cursor = conn.execute(
-            "INSERT INTO users (telegram_id, username) VALUES (?, ?)",
-            (telegram_id, username)
+            "INSERT INTO users (telegram_id, username, referral_code) VALUES (?, ?, ?)",
+            (telegram_id, username, referral_code)
         )
-        logger.info(f"Новый пользователь: {telegram_id} (@{username})")
+        logger.info(f"Новый пользователь: {telegram_id} (@{username}), referral_code: {referral_code}")
         
         return {
             'id': cursor.lastrowid,
             'telegram_id': telegram_id,
             'username': username,
-            'is_banned': 0
-        }
+            'is_banned': 0,
+            'referral_code': referral_code,
+            'referred_by': None,
+            'personal_balance': 0,
+            'referral_coefficient': 1.0
+        }, True
 
 
 def is_user_banned(telegram_id: int) -> bool:
@@ -1961,3 +1983,419 @@ def get_user_internal_id(telegram_id: int) -> Optional[int]:
         )
         row = cursor.fetchone()
         return row['id'] if row else None
+
+
+def get_user_by_referral_code(code: str) -> Optional[Dict[str, Any]]:
+    """
+    Найти пользователя по реферальному коду.
+    
+    Args:
+        code: Реферальный код (8 символов)
+    
+    Returns:
+        Словарь с данными пользователя или None
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT * FROM users WHERE referral_code = ?",
+            (code,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def set_user_referrer(user_id: int, referrer_id: int) -> bool:
+    """
+    Привязать реферера к пользователю.
+    
+    Args:
+        user_id: ID пользователя (того, кого пригласили)
+        referrer_id: ID пригласившего (реферера)
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET referred_by = ? WHERE id = ? AND referred_by IS NULL",
+            (referrer_id, user_id)
+        )
+        success = cursor.rowcount > 0
+        if success:
+            logger.info(f"Пользователь {user_id} привязан к рефереру {referrer_id}")
+        return success
+
+
+def get_user_referrer(user_id: int) -> Optional[int]:
+    """
+    Получить ID пригласившего пользователя (referred_by).
+    
+    Args:
+        user_id: Внутренний ID пользователя
+    
+    Returns:
+        ID реферера или None
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT referred_by FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        return row['referred_by'] if row else None
+
+
+def ensure_user_referral_code(user_id: int) -> str:
+    """
+    Убедиться что у пользователя есть реферальный код, вернуть его.
+    FALLBACK: используется только если код не был создан при регистрации.
+    
+    Args:
+        user_id: Внутренний ID пользователя
+    
+    Returns:
+        Реферальный код пользователя
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT referral_code FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        
+        if row and row['referral_code']:
+            return row['referral_code']
+        
+        referral_code = _generate_referral_code()
+        attempts = 0
+        while attempts < 100:
+            cursor = conn.execute("SELECT 1 FROM users WHERE referral_code = ?", (referral_code,))
+            if not cursor.fetchone():
+                break
+            referral_code = _generate_referral_code()
+            attempts += 1
+        
+        conn.execute(
+            "UPDATE users SET referral_code = ? WHERE id = ?",
+            (referral_code, user_id)
+        )
+        logger.info(f"Сгенерирован referral_code для user_id {user_id}: {referral_code}")
+        return referral_code
+
+
+def get_referral_levels() -> List[Dict[str, Any]]:
+    """
+    Получить все уровни реферальной системы.
+    
+    Returns:
+        Список [{level_number, percent, enabled}, ...]
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT level_number, percent, enabled FROM referral_levels ORDER BY level_number"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_active_referral_levels() -> List[tuple]:
+    """
+    Получить только включённые уровни.
+    
+    Returns:
+        Список кортежей [(level_num, percent), ...]
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT level_number, percent FROM referral_levels WHERE enabled = 1 ORDER BY level_number"
+        )
+        return [(row['level_number'], row['percent']) for row in cursor.fetchall()]
+
+
+def update_referral_level(level_number: int, percent: int, enabled: bool) -> bool:
+    """
+    Обновить уровень реферальной системы.
+    
+    Args:
+        level_number: Номер уровня (1, 2, 3)
+        percent: Процент (1-100)
+        enabled: Включён ли уровень
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE referral_levels SET percent = ?, enabled = ? WHERE level_number = ?",
+            (percent, 1 if enabled else 0, level_number)
+        )
+        success = cursor.rowcount > 0
+        if success:
+            logger.info(f"Уровень {level_number} обновлён: {percent}%, enabled={enabled}")
+        return success
+
+
+def get_referral_stats(user_id: int) -> List[Dict[str, Any]]:
+    """
+    Статистика по уровням для пользователя.
+    
+    Args:
+        user_id: Внутренний ID пользователя (реферера)
+    
+    Returns:
+        Список [{level, count, total_reward_cents, total_reward_days}, ...]
+    """
+    with get_db() as conn:
+        cursor = conn.execute("""
+            SELECT 
+                level,
+                COUNT(*) as count,
+                COALESCE(SUM(total_reward_cents), 0) as total_reward_cents,
+                COALESCE(SUM(total_reward_days), 0) as total_reward_days
+            FROM referral_stats
+            WHERE referrer_id = ?
+            GROUP BY level
+            ORDER BY level
+        """, (user_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def update_referral_stat(
+    referrer_id: int, 
+    referral_id: int, 
+    level: int, 
+    reward_cents: int, 
+    reward_days: int
+) -> bool:
+    """
+    Обновить статистику реферала (INSERT ON CONFLICT DO UPDATE).
+    
+    Args:
+        referrer_id: ID реферера
+        referral_id: ID реферала
+        level: Уровень (1, 2, 3)
+        reward_cents: Вознаграждение в копейках
+        reward_days: Вознаграждение в днях
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO referral_stats (referrer_id, referral_id, level, total_payments_count, total_reward_cents, total_reward_days)
+            VALUES (?, ?, ?, 1, ?, ?)
+            ON CONFLICT(referrer_id, referral_id, level) DO UPDATE SET
+                total_payments_count = total_payments_count + 1,
+                total_reward_cents = total_reward_cents + excluded.total_reward_cents,
+                total_reward_days = total_reward_days + excluded.total_reward_days
+        """, (referrer_id, referral_id, level, reward_cents, reward_days))
+        return True
+
+
+def get_user_balance(user_id: int) -> int:
+    """
+    Получить баланс пользователя в копейках.
+    
+    Args:
+        user_id: Внутренний ID пользователя
+    
+    Returns:
+        Баланс в копейках (0 если пользователь не найден)
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT personal_balance FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        return row['personal_balance'] if row else 0
+
+
+def add_to_balance(user_id: int, cents: int) -> bool:
+    """
+    Добавить к балансу. СИНХРОННАЯ функция, вызывается внутри async with user_locks[user_id].
+    
+    Args:
+        user_id: Внутренний ID пользователя
+        cents: Сумма в копейках
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET personal_balance = personal_balance + ? WHERE id = ?",
+            (cents, user_id)
+        )
+        success = cursor.rowcount > 0
+        if success:
+            logger.info(f"Баланс пользователя {user_id} пополнен на {cents} копеек")
+        return success
+
+
+def deduct_from_balance(user_id: int, cents: int) -> bool:
+    """
+    Списать с баланса. СИНХРОННАЯ функция, вызывается внутри async with user_locks[user_id].
+    
+    Args:
+        user_id: Внутренний ID пользователя
+        cents: Сумма в копейках
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET personal_balance = personal_balance - ? WHERE id = ? AND personal_balance >= ?",
+            (cents, user_id, cents)
+        )
+        success = cursor.rowcount > 0
+        if success:
+            logger.info(f"С баланса пользователя {user_id} списано {cents} копеек")
+        return success
+
+
+def get_user_referral_coefficient(user_id: int) -> float:
+    """
+    Получить индивидуальный коэффициент реферальных отчислений.
+    
+    Args:
+        user_id: Внутренний ID пользователя
+    
+    Returns:
+        Коэффициент (по умолчанию 1.0)
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT referral_coefficient FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        return row['referral_coefficient'] if row else 1.0
+
+
+def set_user_referral_coefficient(user_id: int, coefficient: float) -> bool:
+    """
+    Установить индивидуальный коэффициент реферальных отчислений.
+    
+    Args:
+        user_id: Внутренний ID пользователя
+        coefficient: Коэффициент (0.0 - 10.0)
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET referral_coefficient = ? WHERE id = ?",
+            (coefficient, user_id)
+        )
+        success = cursor.rowcount > 0
+        if success:
+            logger.info(f"Коэффициент пользователя {user_id} установлен: {coefficient}")
+        return success
+
+
+def add_days_to_first_active_key(user_id: int, days: int) -> bool:
+    """
+    Добавить дни к первому активному ключу пользователя.
+    
+    Args:
+        user_id: Внутренний ID пользователя
+        days: Количество дней для добавления
+    
+    Returns:
+        True если успешно, False если нет активных ключей
+    """
+    with get_db() as conn:
+        cursor = conn.execute("""
+            SELECT id FROM vpn_keys 
+            WHERE user_id = ? AND expires_at > datetime('now')
+            ORDER BY expires_at DESC
+            LIMIT 1
+        """, (user_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            logger.info(f"Нет активных ключей у пользователя {user_id} для добавления дней")
+            return False
+        
+        key_id = row['id']
+        conn.execute("""
+            UPDATE vpn_keys 
+            SET expires_at = datetime(expires_at, '+' || ? || ' days')
+            WHERE id = ?
+        """, (days, key_id))
+        
+        logger.info(f"Ключ {key_id} пользователя {user_id} продлён на {days} дней (реферальное вознаграждение)")
+        return True
+
+
+def is_referral_enabled() -> bool:
+    """Включена ли реферальная система."""
+    return get_setting('referral_enabled', '0') == '1'
+
+
+def get_referral_reward_type() -> str:
+    """Тип начисления: 'days' или 'balance'."""
+    return get_setting('referral_reward_type', 'days')
+
+
+def get_referral_conditions_text() -> str:
+    """Текст условий реферальной программы."""
+    return get_setting('referral_conditions_text', '')
+
+
+def update_referral_setting(key: str, value: str) -> bool:
+    """
+    Обновить настройку реферальной системы.
+    
+    Args:
+        key: Ключ настройки
+        value: Значение
+    
+    Returns:
+        True если успешно
+    """
+    return set_setting(key, value) is not None
+
+
+def get_exchange_rate(currency_pair: str) -> Optional[int]:
+    """
+    Получить курс из БД (fallback).
+    
+    Args:
+        currency_pair: Пара валют (например, 'USD_RUB')
+    
+    Returns:
+        Курс в копейках или None
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT rate FROM exchange_rates WHERE currency_pair = ?",
+            (currency_pair,)
+        )
+        row = cursor.fetchone()
+        return row['rate'] if row else None
+
+
+def update_exchange_rate(currency_pair: str, rate: int) -> bool:
+    """
+    Сохранить курс в БД.
+    
+    Args:
+        currency_pair: Пара валют (например, 'USD_RUB')
+        rate: Курс в копейках
+    
+    Returns:
+        True если успешно
+    """
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO exchange_rates (currency_pair, rate, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(currency_pair) DO UPDATE SET
+                rate = excluded.rate,
+                updated_at = CURRENT_TIMESTAMP
+        """, (currency_pair, rate))
+        logger.info(f"Курс {currency_pair} обновлён: {rate}")
+        return True

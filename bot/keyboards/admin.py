@@ -56,7 +56,6 @@ def admin_main_menu_kb() -> InlineKeyboardMarkup:
     """Главное меню админ-панели."""
     builder = InlineKeyboardBuilder()
     
-    # Основные разделы
     builder.row(
         InlineKeyboardButton(text="🖥️ Сервера", callback_data="admin_servers")
     )
@@ -67,23 +66,12 @@ def admin_main_menu_kb() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")
     )
-    
-    # Пробная подписка
-    builder.row(
-        InlineKeyboardButton(text="🎁 Пробная подписка", callback_data="admin_trial")
-    )
-    
-    # Настройки бота (обновление, остановка, тексты)
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки бота", callback_data="admin_bot_settings")
     )
-    
-    # Скачать логи
     builder.row(
         InlineKeyboardButton(text="📥 Скачать логи", callback_data="admin_logs_menu")
     )
-    
-    # На главную
     builder.row(home_button())
     
     return builder.as_markup()
@@ -135,22 +123,22 @@ def bot_settings_kb() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    # Обновить бота (проверка происходит при нажатии)
     builder.row(
         InlineKeyboardButton(text="🔄 Обновить бота", callback_data="admin_update_bot")
     )
     
-    # Изменить тексты (заглушка)
     builder.row(
         InlineKeyboardButton(text="✏️ Изменить тексты", callback_data="admin_edit_texts")
     )
     
-    # Остановить бота
+    builder.row(
+        InlineKeyboardButton(text="🔗 Реферальная система", callback_data="admin_referral")
+    )
+    
     builder.row(
         InlineKeyboardButton(text="🛑 Остановить бота", callback_data="admin_stop_bot")
     )
     
-    # Навигация
     builder.row(back_button("admin_panel"), home_button())
     
     return builder.as_markup()
@@ -476,12 +464,19 @@ def payments_menu_kb(
             callback_data="admin_tariffs"
         )
     )
+    
+    # Пробная подписка
+    builder.row(
+        InlineKeyboardButton(
+            text="🎁 Пробная подписка",
+            callback_data="admin_trial"
+        )
+    )
 
     # Навигация
     builder.row(back_button("admin_panel"), home_button())
-
+    
     return builder.as_markup()
-
 
 
 def crypto_setup_kb(step: int) -> InlineKeyboardMarkup:
@@ -1077,7 +1072,9 @@ def users_list_kb(
 def user_view_kb(
     telegram_id: int, 
     vpn_keys: List[Dict[str, Any]], 
-    is_banned: bool
+    is_banned: bool,
+    balance_cents: int = 0,
+    referral_coefficient: float = 1.0
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура просмотра пользователя.
@@ -1086,28 +1083,25 @@ def user_view_kb(
         telegram_id: Telegram ID пользователя
         vpn_keys: Список VPN-ключей пользователя
         is_banned: Забанен ли пользователь
+        balance_cents: Баланс в копейках
+        referral_coefficient: Реферальный коэффициент
     """
     builder = InlineKeyboardBuilder()
     
-    # VPN-ключи (каждый как кнопка-ссылка)
     for key in vpn_keys:
         key_id = key['id']
         
-        # Формируем название ключа согласно ТЗ
         if key.get('custom_name'):
             key_name = key['custom_name']
         else:
-            # Формат: первые_4_символа...последние_4_символа от client_uuid
             uuid = key.get('client_uuid') or ''
             if len(uuid) >= 8:
                 key_name = f"{uuid[:4]}...{uuid[-4:]}"
             else:
                 key_name = uuid or f"Ключ #{key_id}"
         
-        # Статус ключа
         expires_at = key.get('expires_at')
         if expires_at:
-            # Считаем что istёк если expires_at < now (нужна проверка в коде)
             status = "🔑"
         else:
             status = "🔑"
@@ -1119,7 +1113,6 @@ def user_view_kb(
             )
         )
     
-    # Добавить ключ
     builder.row(
         InlineKeyboardButton(
             text="➕ Добавить ключ",
@@ -1127,7 +1120,29 @@ def user_view_kb(
         )
     )
     
-    # Бан/разбан
+    balance_rub = balance_cents / 100
+    builder.row(
+        InlineKeyboardButton(
+            text=f"💰 Баланс: {balance_rub:.2f} ₽",
+            callback_data=f"admin_user_balance:{telegram_id}"
+        ),
+        InlineKeyboardButton(
+            text="➕ Пополнить",
+            callback_data=f"admin_user_balance_add:{telegram_id}"
+        ),
+        InlineKeyboardButton(
+            text="➖ Списать",
+            callback_data=f"admin_user_balance_deduct:{telegram_id}"
+        )
+    )
+    
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📊 Коэффициент: {referral_coefficient}x",
+            callback_data=f"admin_user_coefficient:{telegram_id}"
+        )
+    )
+    
     if is_banned:
         ban_text = "✅ Разблокировать"
     else:
@@ -1140,7 +1155,6 @@ def user_view_kb(
         )
     )
     
-    # Навигация
     builder.row(back_button("admin_users_list"), home_button())
     
     return builder.as_markup()
@@ -1419,6 +1433,97 @@ def trial_edit_text_cancel_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="❌ Отмена", callback_data="admin_trial")
+    )
+    return builder.as_markup()
+
+
+# ============================================================================
+# РЕФЕРАЛЬНАЯ СИСТЕМА
+# ============================================================================
+
+def referral_main_kb(
+    enabled: bool,
+    reward_type: str,
+    levels: List[Dict[str, Any]]
+) -> InlineKeyboardMarkup:
+    """
+    Главное меню реферальной системы.
+    
+    Args:
+        enabled: Включена ли система
+        reward_type: Тип начисления ('days' или 'balance')
+        levels: Список уровней [{level_number, percent, enabled}, ...]
+    """
+    builder = InlineKeyboardBuilder()
+    
+    toggle_text = "🟢 Выключить" if enabled else "⚪ Включить"
+    builder.row(
+        InlineKeyboardButton(text=toggle_text, callback_data="admin_referral_toggle")
+    )
+    
+    if reward_type == 'days':
+        type_text = "📅 Режим: Дни к ключу"
+    else:
+        type_text = "💰 Режим: На баланс"
+    builder.row(
+        InlineKeyboardButton(text=type_text, callback_data="admin_referral_toggle_type")
+    )
+    
+    for level in levels:
+        level_num = level['level_number']
+        percent = level['percent']
+        is_enabled = level['enabled']
+        
+        status = "🟢" if is_enabled else "⚪"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{status} Уровень {level_num}: {percent}%",
+                callback_data=f"admin_referral_level:{level_num}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="📝 Текст условий", callback_data="admin_referral_conditions")
+    )
+    
+    builder.row(back_button("admin_panel"), home_button())
+    
+    return builder.as_markup()
+
+
+def referral_level_kb(level_num: int, percent: int, enabled: bool) -> InlineKeyboardMarkup:
+    """
+    Клавиатура редактирования уровня.
+    
+    Args:
+        level_num: Номер уровня (1-3)
+        percent: Текущий процент
+        enabled: Включён ли уровень
+    """
+    builder = InlineKeyboardBuilder()
+    
+    toggle_text = "🟢 Выключить" if enabled else "⚪ Включить"
+    builder.row(
+        InlineKeyboardButton(text=toggle_text, callback_data=f"admin_referral_level_toggle:{level_num}")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📊 Процент: {percent}%",
+            callback_data=f"admin_referral_level_percent:{level_num}"
+        )
+    )
+    
+    builder.row(back_button("admin_referral"), home_button())
+    
+    return builder.as_markup()
+
+
+def referral_back_kb() -> InlineKeyboardMarkup:
+    """Клавиатура возврата в меню реферальной системы."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin_referral")
     )
     return builder.as_markup()
 
