@@ -6,6 +6,7 @@
 config.py
 logs/
 tests/
+docs/
 results.md
 AGENTS.md
 .agents/
