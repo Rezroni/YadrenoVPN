@@ -21,7 +21,11 @@ from database.requests import (
     update_tariff_field,
     toggle_tariff_active,
     is_crypto_enabled,
-    get_crypto_integration_mode
+    get_crypto_integration_mode,
+    get_groups_count,
+    get_all_groups,
+    get_group_by_id,
+    update_tariff
 )
 from bot.utils.admin import is_admin
 from bot.states.admin_states import (
@@ -37,7 +41,8 @@ from bot.keyboards.admin import (
     add_tariff_step_kb,
     add_tariff_confirm_kb,
     edit_tariff_kb,
-    back_and_home_kb
+    back_and_home_kb,
+    group_select_kb
 )
 
 logger = logging.getLogger(__name__)
@@ -90,10 +95,14 @@ async def show_tariffs_list(callback: CallbackQuery, state: FSMContext):
             status = "🟢" if tariff['is_active'] else "🔴"
             price_usd = tariff['price_cents'] / 100
             price_str = f"{price_usd:g}".replace('.', ',')
+            
+            traffic_gb = tariff.get('traffic_limit_gb', 0)
+            traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлим"
+            
             lines.append(
                 f"{status} *{tariff['name']}* — "
                 f"${price_str} / ⭐ {tariff['price_stars']} / ₽ {tariff.get('price_rub', 0)} / "
-                f"{tariff['duration_days']} дн."
+                f"{tariff['duration_days']} дн. / {traffic_text}"
             )
             
             if tariff.get('external_id'):
@@ -131,8 +140,20 @@ async def render_tariff_view(message: Message, tariff_id: int, state: FSMContext
         f"📅 Длительность: `{tariff['duration_days']} дней`",
     ]
     
+    # Лимит трафика
+    traffic_gb = tariff.get('traffic_limit_gb', 0)
+    traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлимит"
+    lines.append(f"📦 Лимит трафика: `{traffic_text}`")
+    
     if tariff.get('external_id'):
         lines.append(f"🔗 ID тарифа (Ya.Seller): `{tariff['external_id']}`")
+    
+    # Группа (показываем только если > 1 группы)
+    groups_count = get_groups_count()
+    if groups_count > 1:
+        group = get_group_by_id(tariff.get('group_id', 1))
+        group_name = group['name'] if group else 'Основная'
+        lines.append(f"📂 Группа: `{group_name}`")
     
     lines.extend([
         f"📊 Порядок: `{tariff.get('display_order', 0)}`",
@@ -141,7 +162,7 @@ async def render_tariff_view(message: Message, tariff_id: int, state: FSMContext
     
     await message.edit_text(
         "\n".join(lines),
-        reply_markup=tariff_view_kb(tariff_id, tariff['is_active']),
+        reply_markup=tariff_view_kb(tariff_id, tariff['is_active'], groups_count > 1),
         parse_mode="Markdown"
     )
 
@@ -206,6 +227,7 @@ ADD_TARIFF_STATES = [
     AdminStates.add_tariff_price_stars,
     AdminStates.add_tariff_price_rub,
     AdminStates.add_tariff_duration,
+    AdminStates.add_tariff_traffic_limit,
     AdminStates.add_tariff_external_id,
 ]
 
@@ -228,6 +250,7 @@ def get_add_step_state(step: int, include_crypto: bool, crypto_mode: str) -> Adm
         'price_stars': AdminStates.add_tariff_price_stars,
         'price_rub': AdminStates.add_tariff_price_rub,
         'duration_days': AdminStates.add_tariff_duration,
+        'traffic_limit_gb': AdminStates.add_tariff_traffic_limit,
         'external_id': AdminStates.add_tariff_external_id,
         'display_order': AdminStates.add_tariff_confirm,  # display_order пропускаем при добавлении
     }
@@ -279,14 +302,60 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
     include_crypto = is_crypto_enabled()
     crypto_mode = get_crypto_integration_mode()
     
+    # Если > 1 группы — сначала выбираем группу
+    groups_count = get_groups_count()
+    if groups_count > 1:
+        groups = get_all_groups()
+        await state.set_state(AdminStates.tariff_select_group)
+        await state.update_data(tariff_data={}, include_crypto=include_crypto, crypto_mode=crypto_mode)
+        
+        await callback.message.edit_text(
+            "📝 *Добавление тарифа*\n\n"
+            "Выберите группу для нового тарифа:",
+            reply_markup=group_select_kb(groups, "tariff_group_select", "admin_tariffs"),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    # Одна группа — сразу к вводу данных
     await state.set_state(AdminStates.add_tariff_name)
-    await state.update_data(tariff_data={}, add_step=1, include_crypto=include_crypto, crypto_mode=crypto_mode)
+    await state.update_data(tariff_data={}, add_step=1, include_crypto=include_crypto, crypto_mode=crypto_mode, selected_group_id=1)
     
     params = get_tariff_params_list(include_crypto, crypto_mode)
     params = [p for p in params if p['key'] != 'display_order']
     total = len(params)
     
     text = get_add_step_text(1, {}, include_crypto, crypto_mode)
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=add_tariff_step_kb(1, total),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminStates.tariff_select_group, F.data.startswith("tariff_group_select:"))
+async def tariff_group_selected(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора группы для нового тарифа."""
+    group_id = int(callback.data.split(":")[1])
+    
+    data = await state.get_data()
+    include_crypto = data.get('include_crypto', False)
+    crypto_mode = data.get('crypto_mode', 'standard')
+    
+    await state.set_state(AdminStates.add_tariff_name)
+    await state.update_data(add_step=1, selected_group_id=group_id)
+    
+    params = get_tariff_params_list(include_crypto, crypto_mode)
+    params = [p for p in params if p['key'] != 'display_order']
+    total = len(params)
+    
+    group = get_group_by_id(group_id)
+    group_name = group['name'] if group else 'Основная'
+    
+    text = f"📂 Группа: *{group_name}*\n\n" + get_add_step_text(1, {}, include_crypto, crypto_mode)
     
     await callback.message.edit_text(
         text,
@@ -405,6 +474,11 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
             f"📅 Длительность: `{tariff_data['duration_days']} дней`",
         ]
         
+        # Лимит трафика
+        traffic_gb = tariff_data.get('traffic_limit_gb', 0)
+        traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлимит"
+        lines.append(f"📦 Лимит трафика: `{traffic_text}`")
+        
         if tariff_data.get('external_id'):
             lines.append(f"🔗 ID тарифа: `{tariff_data['external_id']}`")
         
@@ -448,6 +522,11 @@ async def add_tariff_external_id_handler(message: Message, state: FSMContext):
     await process_add_tariff_step(message, state)
 
 
+@router.message(AdminStates.add_tariff_traffic_limit)
+async def add_tariff_traffic_limit_handler(message: Message, state: FSMContext):
+    await process_add_tariff_step(message, state)
+
+
 @router.callback_query(F.data == "admin_tariff_add_save")
 async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
     """Сохраняет новый тариф."""
@@ -459,6 +538,7 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
     tariff_data = data.get('tariff_data', {})
     
     try:
+        selected_group_id = data.get('selected_group_id', 1)
         tariff_id = add_tariff(
             name=tariff_data['name'],
             duration_days=tariff_data['duration_days'],
@@ -466,7 +546,9 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
             price_stars=tariff_data['price_stars'],
             price_rub=tariff_data.get('price_rub', 0),
             external_id=tariff_data.get('external_id'),
-            display_order=0
+            display_order=0,
+            traffic_limit_gb=tariff_data.get('traffic_limit_gb', 0),
+            group_id=selected_group_id
         )
         
         await callback.message.edit_text(
@@ -683,3 +765,58 @@ async def edit_tariff_done(callback: CallbackQuery, state: FSMContext):
 async def edit_tariff_cancel(callback: CallbackQuery, state: FSMContext):
     """Отмена редактирования — возврат к просмотру."""
     await edit_tariff_done(callback, state)
+
+
+# ============================================================================
+# ИЗМЕНЕНИЕ ГРУППЫ ТАРИФА
+# ============================================================================
+
+@router.callback_query(F.data.startswith("admin_tariff_change_group:"))
+async def tariff_change_group_start(callback: CallbackQuery, state: FSMContext):
+    """Показывает список групп для смены группы тарифа."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tariff_id = int(callback.data.split(":")[1])
+    tariff = get_tariff_by_id(tariff_id)
+    
+    if not tariff:
+        await callback.answer("❌ Тариф не найден", show_alert=True)
+        return
+    
+    groups = get_all_groups()
+    
+    await callback.message.edit_text(
+        f"📂 *Смена группы тарифа «{tariff['name']}»*\n\n"
+        "Выберите новую группу:",
+        reply_markup=group_select_kb(groups, "tariff_group_change", f"admin_tariff_view:{tariff_id}"),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tariff_group_change:"))
+async def tariff_change_group_execute(callback: CallbackQuery, state: FSMContext):
+    """Меняет группу тарифа."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    new_group_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    tariff_id = data.get('tariff_id')
+    
+    if not tariff_id:
+        await callback.answer("❌ Ошибка состояния", show_alert=True)
+        return
+    
+    update_tariff(tariff_id, group_id=new_group_id)
+    
+    group = get_group_by_id(new_group_id)
+    group_name = group['name'] if group else 'Основная'
+    
+    await callback.answer(f"✅ Группа изменена на «{group_name}»")
+    
+    # Обновляем экран просмотра тарифа
+    await render_tariff_view(callback.message, tariff_id, state)

@@ -1,0 +1,191 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from typing import List, Dict, Any, Optional
+
+from .admin_misc import back_button, home_button, cancel_button
+
+USERS_FILTERS = {'all': '👤 Все', 'active': '✅ Активные', 'inactive': '❌ Неактивные', 'never_paid': '🆕 Новые', 'expired': '🚫 Истёкшие'}
+
+def users_menu_kb(stats: Dict[str, int]) -> InlineKeyboardMarkup:
+    """
+    Главное меню раздела пользователей.
+    
+    Args:
+        stats: Статистика пользователей по фильтрам
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text=f"📋 Все пользователи ({stats.get('total', 0)})", callback_data='admin_users_list'))
+    builder.row(InlineKeyboardButton(text='🔍 Выбрать пользователя', callback_data='admin_users_select'))
+    builder.row(back_button('admin_panel'), home_button())
+    return builder.as_markup()
+
+def users_list_kb(users: List[Dict[str, Any]], page: int, total_pages: int, current_filter: str='all') -> InlineKeyboardMarkup:
+    """
+    Клавиатура списка пользователей с пагинацией и фильтрами.
+    
+    Args:
+        users: Список пользователей на текущей странице
+        page: Номер текущей страницы (начиная с 0)
+        total_pages: Общее количество страниц
+        current_filter: Текущий фильтр
+    """
+    builder = InlineKeyboardBuilder()
+    filter_buttons = []
+    for (filter_key, filter_name) in USERS_FILTERS.items():
+        text = f'🔹{filter_name}' if filter_key == current_filter else filter_name
+        filter_buttons.append(InlineKeyboardButton(text=text, callback_data=f'admin_users_filter:{filter_key}'))
+    builder.row(*filter_buttons[:3])
+    builder.row(*filter_buttons[3:])
+    for user in users:
+        username = user.get('username')
+        telegram_id = user.get('telegram_id')
+        if username:
+            text = f'@{username}'
+        else:
+            text = f'ID: {telegram_id}'
+        builder.row(InlineKeyboardButton(text=text, callback_data=f'admin_user_view:{telegram_id}'))
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(text='◀️', callback_data=f'admin_users_page:{page - 1}'))
+        nav_buttons.append(InlineKeyboardButton(text=f'{page + 1}/{total_pages}', callback_data='noop'))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(text='▶️', callback_data=f'admin_users_page:{page + 1}'))
+        builder.row(*nav_buttons)
+    builder.row(back_button('admin_users'), home_button())
+    return builder.as_markup()
+
+def user_view_kb(telegram_id: int, vpn_keys: List[Dict[str, Any]], is_banned: bool, balance_cents: int=0, referral_coefficient: float=1.0) -> InlineKeyboardMarkup:
+    """
+    Клавиатура просмотра пользователя.
+    
+    Args:
+        telegram_id: Telegram ID пользователя
+        vpn_keys: Список VPN-ключей пользователя
+        is_banned: Забанен ли пользователь
+        balance_cents: Баланс в копейках
+        referral_coefficient: Реферальный коэффициент
+    """
+    builder = InlineKeyboardBuilder()
+    for key in vpn_keys:
+        key_id = key['id']
+        if key.get('custom_name'):
+            key_name = key['custom_name']
+        else:
+            uuid = key.get('client_uuid') or ''
+            if len(uuid) >= 8:
+                key_name = f'{uuid[:4]}...{uuid[-4:]}'
+            else:
+                key_name = uuid or f'Ключ #{key_id}'
+        expires_at = key.get('expires_at')
+        if expires_at:
+            status = '🔑'
+        else:
+            status = '🔑'
+        builder.row(InlineKeyboardButton(text=f'{status} {key_name}', callback_data=f'admin_key_view:{key_id}'))
+    builder.row(InlineKeyboardButton(text='➕ Добавить ключ', callback_data=f'admin_user_add_key:{telegram_id}'))
+    balance_rub = balance_cents / 100
+    builder.row(InlineKeyboardButton(text=f'💰 Баланс: {balance_rub:.2f} ₽', callback_data=f'admin_user_balance:{telegram_id}'), InlineKeyboardButton(text='➕ Пополнить', callback_data=f'admin_user_balance_add:{telegram_id}'), InlineKeyboardButton(text='➖ Списать', callback_data=f'admin_user_balance_deduct:{telegram_id}'))
+    builder.row(InlineKeyboardButton(text=f'📊 Коэффициент: {referral_coefficient}x', callback_data=f'admin_user_coefficient:{telegram_id}'))
+    if is_banned:
+        ban_text = '✅ Разблокировать'
+    else:
+        ban_text = '🚫 Заблокировать'
+    builder.row(InlineKeyboardButton(text=ban_text, callback_data=f'admin_user_toggle_ban:{telegram_id}'))
+    builder.row(back_button('admin_users_list'), home_button())
+    return builder.as_markup()
+
+def user_ban_confirm_kb(telegram_id: int, is_banned: bool) -> InlineKeyboardMarkup:
+    """
+    Клавиатура подтверждения бана/разбана.
+    
+    Args:
+        telegram_id: Telegram ID пользователя
+        is_banned: Текущий статус (True = забанен)
+    """
+    builder = InlineKeyboardBuilder()
+    if is_banned:
+        confirm_text = '✅ Да, разблокировать'
+    else:
+        confirm_text = '🚫 Да, заблокировать'
+    builder.row(InlineKeyboardButton(text=confirm_text, callback_data=f'admin_user_ban_confirm:{telegram_id}'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data=f'admin_user_view:{telegram_id}'))
+    return builder.as_markup()
+
+def key_view_kb(key_id: int, user_telegram_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура управления VPN-ключом.
+    
+    Args:
+        key_id: ID ключа
+        user_telegram_id: Telegram ID владельца (для возврата)
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='📅 Продлить', callback_data=f'admin_key_extend:{key_id}'))
+    builder.row(InlineKeyboardButton(text='🔄 Сбросить трафик', callback_data=f'admin_key_reset_traffic:{key_id}'))
+    builder.row(InlineKeyboardButton(text='📊 Изменить лимит трафика', callback_data=f'admin_key_change_traffic:{key_id}'))
+    builder.row(back_button(f'admin_user_view:{user_telegram_id}'), home_button())
+    return builder.as_markup()
+
+def add_key_server_kb(servers: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора сервера для нового ключа.
+    
+    Args:
+        servers: Список активных серверов
+    """
+    builder = InlineKeyboardBuilder()
+    for server in servers:
+        builder.row(InlineKeyboardButton(text=f"🖥️ {server['name']}", callback_data=f"admin_add_key_server:{server['id']}"))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_user_add_key_cancel'))
+    return builder.as_markup()
+
+def add_key_inbound_kb(inbounds: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора inbound для нового ключа.
+    
+    Args:
+        inbounds: Список inbound-подключений
+    """
+    builder = InlineKeyboardBuilder()
+    for inbound in inbounds:
+        inbound_id = inbound.get('id')
+        protocol = inbound.get('protocol', 'unknown')
+        remark = inbound.get('remark', f'Inbound #{inbound_id}')
+        builder.row(InlineKeyboardButton(text=f'🔌 {remark} ({protocol})', callback_data=f'admin_add_key_inbound:{inbound_id}'))
+    builder.row(InlineKeyboardButton(text='⬅️ Назад', callback_data='admin_add_key_back'), InlineKeyboardButton(text='❌ Отмена', callback_data='admin_user_add_key_cancel'))
+    return builder.as_markup()
+
+def add_key_step_kb(step: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для шагов добавления ключа (трафик, дни).
+    
+    Args:
+        step: Текущий шаг
+    """
+    builder = InlineKeyboardBuilder()
+    buttons = []
+    if step > 1:
+        buttons.append(InlineKeyboardButton(text='⬅️ Назад', callback_data='admin_add_key_back'))
+    buttons.append(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_user_add_key_cancel'))
+    builder.row(*buttons)
+    return builder.as_markup()
+
+def add_key_confirm_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения создания ключа."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='✅ Создать ключ', callback_data='admin_add_key_confirm'))
+    builder.row(InlineKeyboardButton(text='⬅️ Назад', callback_data='admin_add_key_back'), InlineKeyboardButton(text='❌ Отмена', callback_data='admin_user_add_key_cancel'))
+    return builder.as_markup()
+
+def users_input_cancel_kb() -> InlineKeyboardMarkup:
+    """Клавиатура отмены ввода."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_users'))
+    return builder.as_markup()
+
+def key_action_cancel_kb(key_id: int, user_telegram_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура отмены действия с ключом."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data=f'admin_key_view:{key_id}'))
+    return builder.as_markup()

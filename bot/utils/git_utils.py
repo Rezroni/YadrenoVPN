@@ -7,7 +7,7 @@ import subprocess
 import logging
 import sys
 import os
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -120,52 +120,150 @@ def set_remote_url(url: str) -> Tuple[bool, str]:
         return run_git_command(['remote', 'add', 'origin', url])
 
 
-def check_for_updates() -> Tuple[bool, int, str]:
+def get_pending_commits_list() -> Tuple[bool, List[Dict[str, str]]]:
     """
-    Проверяет наличие обновлений на сервере.
+    Получает список коммитов между HEAD и origin/branch.
+    
+    Выполняет git fetch перед проверкой.
     
     Returns:
-        (success, commits_behind, log_text)
-        - success: успешно ли выполнена проверка
-        - commits_behind: количество коммитов позади
-        - log_text: лог новых коммитов или сообщение об ошибке
+        (success, commits) — список словарей [{"hash": str, "message": str}, ...]
+        от старого к новому (--reverse)
     """
     # Получаем обновления с сервера
     success, output = run_git_command(['fetch', 'origin'], timeout=60)
     if not success:
-        return False, 0, f"Ошибка fetch: {output}"
+        logger.error(f"Ошибка fetch при получении списка коммитов: {output}")
+        return False, []
     
     # Получаем текущую ветку
     branch = get_current_branch()
     if not branch:
-        return False, 0, "Не удалось определить текущую ветку"
+        logger.error("Не удалось определить текущую ветку")
+        return False, []
     
-    # Считаем количество коммитов позади
+    # Проверяем, существует ли удаленная ветка
+    success, _ = run_git_command(['rev-parse', '--verify', f'origin/{branch}'])
+    if not success:
+        logger.warning(f"Удаленная ветка origin/{branch} не найдена. Обновления недоступны.")
+        return True, []
+        
+    # Получаем список коммитов от старого к новому
     success, output = run_git_command([
-        'rev-list', '--count', f'HEAD..origin/{branch}'
+        'log', f'HEAD..origin/{branch}', '--format=%H|%s', '--reverse'
     ])
     
     if not success:
-        return False, 0, f"Ошибка подсчёта коммитов: {output}"
+        logger.error(f"Ошибка получения списка коммитов: {output}")
+        return False, []
     
+    if not output.strip():
+        return True, []
+    
+    commits = []
+    for line in output.strip().split('\n'):
+        if '|' in line:
+            parts = line.split('|', 1)
+            commits.append({
+                "hash": parts[0].strip(),
+                "message": parts[1].strip()
+            })
+    
+    logger.debug(f"Найдено {len(commits)} ожидающих коммитов")
+    return True, commits
+
+
+def find_first_blocking_commit(commits: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """
+    Находит первый блокирующий коммит в списке.
+    
+    Блокирующий коммит — тот, чьё сообщение начинается с '!'.
+    Чистая функция, никаких git-операций.
+    
+    Args:
+        commits: Список коммитов из get_pending_commits_list()
+    
+    Returns:
+        Словарь {"hash": ..., "message": ...} или None если блокирующих нет
+    """
+    for commit in commits:
+        if commit.get("message", "").startswith("!"):
+            return commit
+    return None
+
+
+def pull_to_commit(commit_hash: str) -> Tuple[bool, str]:
+    """
+    Обновляет код до конкретного коммита через git reset --hard.
+    
+    НЕ делает перезапуск — это ответственность вызывающего кода.
+    
+    Args:
+        commit_hash: Полный хеш коммита для обновления
+    
+    Returns:
+        (success, message) — результат операции
+    """
     try:
-        commits_behind = int(output.strip())
-    except ValueError:
-        return False, 0, f"Неверный формат: {output}"
+        success, output = run_git_command(['reset', '--hard', commit_hash], timeout=120)
+        if not success:
+            logger.error(f"Ошибка pull_to_commit({commit_hash}): {output}")
+            return False, f"❌ Ошибка обновления до коммита {commit_hash[:8]}:\n{output}"
+        
+        commit_info = get_last_commit_info('HEAD')
+        logger.info(f"✅ Успешно обновлено до блокирующего коммита {commit_hash[:8]}")
+        return True, f"✅ Обновление до блокирующего коммита завершено!\n\n🔹 Текущий коммит:\n```\n{commit_info}\n```"
+    except Exception as e:
+        logger.error(f"Исключение в pull_to_commit({commit_hash}): {e}", exc_info=True)
+        return False, f"❌ Критическая ошибка: {e}"
+
+
+def check_for_updates() -> Tuple[bool, int, str, bool, Optional[Dict[str, str]], bool]:
+    """
+    Проверяет наличие обновлений на сервере.
+    
+    Returns:
+        (success, commits_behind, log_text, has_blocking, blocking_commit, is_beta_only)
+        - success: успешно ли выполнена проверка
+        - commits_behind: количество коммитов позади
+        - log_text: лог новых коммитов или сообщение об ошибке
+        - has_blocking: есть ли блокирующий коммит среди ожидающих
+        - blocking_commit: словарь {"hash": ..., "message": ...} первого блокирующего или None
+        - is_beta_only: все ли ожидающие коммиты являются бета-версиями (начинаются с '?')
+    """
+    # Получаем список ожидающих коммитов (внутри делает fetch)
+    success, pending_commits = get_pending_commits_list()
+    if not success:
+        return False, 0, "Ошибка получения списка коммитов", False, None, False
+    
+    commits_behind = len(pending_commits)
     
     if commits_behind == 0:
-        return True, 0, "✅ Бот уже обновлён до последней версии"
+        return True, 0, "✅ Бот уже обновлён до последней версии", False, None, False
+    
+    # Ищем блокирующий коммит
+    blocking_commit = find_first_blocking_commit(pending_commits)
+    has_blocking = blocking_commit is not None
+    
+    # Проверяем на бета-версии (начинаются с '?')
+    is_beta_only = all(c.get("message", "").startswith("?") for c in pending_commits)
+    
+    if has_blocking:
+        logger.info(f"⚠️ Обнаружен блокирующий коммит: {blocking_commit['hash'][:8]} — {blocking_commit['message']}")
+    
+    # Получаем текущую ветку для лога
+    branch = get_current_branch() or 'main'
     
     # Получаем лог новых коммитов
-    success, log_output = run_git_command([
+    success_log, log_output = run_git_command([
         'log', '--format=%h %B', f'HEAD..origin/{branch}', '-n', '10'
     ])
     
     log_text = f"📦 Доступно обновлений: {commits_behind}\n\n"
-    if success and log_output:
+    if success_log and log_output:
         log_text += "Последние изменения:\n```\n" + log_output + "\n```"
     
-    return True, commits_behind, log_text
+    return True, commits_behind, log_text, has_blocking, blocking_commit
 
 
 def pull_updates() -> Tuple[bool, str]:
@@ -188,6 +286,35 @@ def pull_updates() -> Tuple[bool, str]:
     
     commit_info = get_last_commit_info('HEAD')
     return True, f"✅ Обновление успешно!\n\n🔹 Последний коммит:\n```\n{commit_info}\n```"
+
+
+def force_pull_updates() -> Tuple[bool, str]:
+    """
+    Выполняет принудительный git fetch и reset, полностью перезаписывая локальные изменения.
+    
+    # force_pull намеренно игнорирует блокирующие маркеры — это аварийная функция.
+    # НЕ вызывает pull_to_commit() и НЕ проверяет наличие блокирующих коммитов.
+    # Всегда обновляет до последней версии origin/branch.
+    
+    Returns:
+        (success, message)
+    """
+    # Скачиваем все изменения
+    success, output = run_git_command(['fetch', 'origin'], timeout=120)
+    if not success:
+        return False, f"❌ Ошибка fetch:\n{output}"
+    
+    branch = get_current_branch()
+    if not branch:
+        branch = "main"
+        
+    # Принудительно сбрасываем на удалённую ветку — блокирующие маркеры игнорируются
+    success, output = run_git_command(['reset', '--hard', f'origin/{branch}'], timeout=120)
+    if not success:
+        return False, f"❌ Ошибка принудительного обновления:\n{output}"
+        
+    commit_info = get_last_commit_info('HEAD')
+    return True, f"✅ Принудительное обновление успешно завершено!\nВсе файлы перезаписаны из репозитория.\n\n🔹 Актуальный коммит:\n```\n{commit_info}\n```"
 
 
 def get_last_commit_info(revision: str = 'HEAD') -> str:

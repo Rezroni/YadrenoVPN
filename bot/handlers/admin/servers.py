@@ -22,7 +22,13 @@ from database.requests import (
     add_server,
     update_server_field,
     delete_server,
-    toggle_server_active
+    toggle_server_active,
+    get_groups_count,
+    get_all_groups,
+    get_group_by_id,
+    update_server,
+    get_server_group_ids,
+    toggle_server_group
 )
 from bot.utils.admin import is_admin
 from bot.services.vpn_api import (
@@ -40,12 +46,14 @@ from bot.states.admin_states import (
 from bot.keyboards.admin import (
     servers_list_kb,
     server_view_kb,
+    server_groups_kb,
     add_server_step_kb,
     add_server_confirm_kb,
     add_server_test_failed_kb,
     edit_server_kb,
     confirm_delete_kb,
-    back_and_home_kb
+    back_and_home_kb,
+    group_select_kb
 )
 
 logger = logging.getLogger(__name__)
@@ -108,38 +116,38 @@ async def get_servers_list_text() -> str:
 async def render_server_view(message: Message, server_id: int, state: FSMContext):
     """Отрисовывает экран просмотра сервера."""
     server = get_server_by_id(server_id)
-    
+
     if not server:
         return
-    
+
     await state.set_state(AdminStates.server_view)
     await state.update_data(server_id=server_id)
-    
+
     # Маскируем пароль
     password_masked = "•" * min(len(server['password']), 8)
-    
+
     status_emoji = "🟢" if server['is_active'] else "🔴"
     status_text = "Активен" if server['is_active'] else "Деактивирован"
-    
+
     lines = [
-        f"🖥️ *{server['name']}*\n",
+        f"🗍️ *{server['name']}*\n",
         f"🔗 URL панели: `{server.get('protocol', 'https')}://{server['host']}:{server['port']}{server['web_base_path']}`",
         f"👤 Логин: `{server['login']}`",
         f"🔐 Пароль: `{password_masked}`\n",
         f"📊 *Статистика:*",
         f"   {status_emoji} Статус: {status_text}",
     ]
-    
+
     if server['is_active']:
         try:
             client = get_client_from_server_data(server)
             stats = await client.get_stats()
-            
+
             if stats.get('online'):
                 traffic = format_traffic(stats.get('total_traffic_bytes', 0))
                 lines.append(f"   🔑 Онлайн: {stats.get('online_clients', 0)}")
                 lines.append(f"   📈 Трафик: {traffic}")
-                
+
                 if stats.get('cpu_percent') is not None:
                     lines.append(f"   💻 CPU: {stats['cpu_percent']}%")
             else:
@@ -147,10 +155,22 @@ async def render_server_view(message: Message, server_id: int, state: FSMContext
         except Exception as e:
             logger.warning(f"Ошибка статистики {server['name']}: {e}")
             lines.append(f"   ⚠️ Ошибка подключения")
-    
+
+    # Группы — показываем если групп больше одной
+    groups_count = get_groups_count()
+    if groups_count > 1:
+        group_ids = get_server_group_ids(server_id)
+        group_names = []
+        for gid in group_ids:
+            g = get_group_by_id(gid)
+            if g:
+                group_names.append(g['name'])
+        groups_str = ", ".join(group_names) if group_names else "Основная"
+        lines.append(f"\n📂 Группы: `{groups_str}`")
+
     await message.edit_text(
         "\n".join(lines),
-        reply_markup=server_view_kb(server_id, server['is_active']),
+        reply_markup=server_view_kb(server_id, server['is_active'], groups_count > 1),
         parse_mode="Markdown"
     )
 
@@ -274,10 +294,48 @@ async def start_add_server(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    # Если > 1 группы — сначала выбираем группу
+    groups_count = get_groups_count()
+    if groups_count > 1:
+        groups = get_all_groups()
+        await state.set_state(AdminStates.server_select_group)
+        await state.update_data(server_data={})
+        
+        await callback.message.edit_text(
+            "📝 *Добавление сервера*\n\n"
+            "Выберите группу для нового сервера:",
+            reply_markup=group_select_kb(groups, "server_group_select", "admin_servers"),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    # Одна группа — сразу к вводу
     await state.set_state(ADD_STATES[0])
-    await state.update_data(server_data={}, add_step=1)
+    await state.update_data(server_data={}, add_step=1, selected_group_id=1)
     
     text = get_add_step_text(1, {})
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=add_server_step_kb(1),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminStates.server_select_group, F.data.startswith("server_group_select:"))
+async def server_group_selected(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора группы для нового сервера."""
+    group_id = int(callback.data.split(":")[1])
+    
+    await state.set_state(ADD_STATES[0])
+    await state.update_data(add_step=1, selected_group_id=group_id)
+    
+    group = get_group_by_id(group_id)
+    group_name = group['name'] if group else 'Основная'
+    
+    text = f"📂 Группа: *{group_name}*\n\n" + get_add_step_text(1, {})
     
     await callback.message.edit_text(
         text,
@@ -518,7 +576,8 @@ async def add_server_save(callback: CallbackQuery, state: FSMContext):
             web_base_path=server_data['web_base_path'],
             login=server_data['login'],
             password=server_data['password'],
-            protocol=server_data.get('protocol', 'https')
+            protocol=server_data.get('protocol', 'https'),
+            group_id=data.get('selected_group_id', 1)
         )
         
         await callback.message.edit_text(
@@ -861,3 +920,74 @@ async def execute_delete_server(callback: CallbackQuery, state: FSMContext):
         await show_servers_list(callback, state)
     else:
         await callback.answer("❌ Ошибка удаления", show_alert=True)
+
+
+# ============================================================================
+# ИЗМЕНЕНИЕ ГРУПП СЕРВЕРА (toggle many-to-many)
+# ============================================================================
+
+@router.callback_query(F.data.startswith("admin_server_change_group:"))
+async def server_change_group_start(callback: CallbackQuery, state: FSMContext):
+    """Shows group toggle screen for the server."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    server_id = int(callback.data.split(":")[1])
+    server = get_server_by_id(server_id)
+
+    if not server:
+        await callback.answer("❌ Сервер не найден", show_alert=True)
+        return
+
+    groups = get_all_groups()
+    selected = get_server_group_ids(server_id)
+
+    group_names = [g['name'] for g in groups if g['id'] in selected]
+    groups_str = ", ".join(group_names) if group_names else "Основная"
+
+    await callback.message.edit_text(
+        f"📂 *Группы сервера «{server['name']}»*\n\n"
+        f"Текущие группы: *{groups_str}*\n\n"
+        "Нажмите на группу чтобы добавить или убрать:",
+        reply_markup=server_groups_kb(server_id, groups, selected),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_server_toggle_group:"))
+async def server_toggle_group(callback: CallbackQuery, state: FSMContext):
+    """Переключает принадлежность сервера к группе."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    server_id = int(parts[1])
+    group_id = int(parts[2])
+
+    now_in_group = toggle_server_group(server_id, group_id)
+
+    group = get_group_by_id(group_id)
+    group_name = group['name'] if group else str(group_id)
+
+    if now_in_group:
+        await callback.answer(f"✅ Добавлен в «{group_name}»")
+    else:
+        await callback.answer(f"➖ Убран из «{group_name}»")
+
+    # Обновляем экран с обновлённым списком галочек
+    server = get_server_by_id(server_id)
+    groups = get_all_groups()
+    selected = get_server_group_ids(server_id)
+    group_names = [g['name'] for g in groups if g['id'] in selected]
+    groups_str = ", ".join(group_names) if group_names else "Основная"
+
+    await callback.message.edit_text(
+        f"📂 *Группы сервера «{server['name']}»*\n\n"
+        f"Текущие группы: *{groups_str}*\n\n"
+        "Нажмите на группу чтобы добавить или убрать:",
+        reply_markup=server_groups_kb(server_id, groups, selected),
+        parse_mode="Markdown"
+    )

@@ -119,6 +119,14 @@ python3 main.py
    systemctl start yadreno-vpn
    ```
 
+## 🧪 Запуск тестов
+
+```bash
+pytest tests/ -v
+```
+
+Тесты используют in-memory SQLite и не требуют запущенного бота или VPN-сервера.
+
 ---
 
 ## 3. 📈 Продвижение и обновления
@@ -155,4 +163,4 @@ python3 main.py
 
 Очень нужна ваша поддержка, даже 100р уже вперед. как говорится с мира по нитке ;)
 💳 **Карты РФ:** https://yoomoney.ru/fundraise/1GJ73GGRJBC.260318
-💰 **USDT (BEP-20 / ERC-20):** `0x79a266c66cf9e71Af1108728e455E0B1D311e95E`
+💰 **USDT (TON/BSC/ARBITRUM):** https://t.me/Ya_SellerBot?start=item-40

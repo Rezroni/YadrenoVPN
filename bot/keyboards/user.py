@@ -259,54 +259,79 @@ def balance_payment_kb(
     return builder.as_markup()
 
 
-def tariff_select_kb(tariffs: list, back_callback: str = "buy_key", order_id: str = None, is_cards: bool = False, is_crypto: bool = False, is_balance: bool = False) -> InlineKeyboardMarkup:
+def tariff_select_kb(tariffs: list, back_callback: str = "buy_key", order_id: str = None, is_cards: bool = False, is_crypto: bool = False, is_balance: bool = False, groups_data: list = None) -> InlineKeyboardMarkup:
     """
     Клавиатура выбора тарифа для оплаты Stars, Картами, Криптой или Балансом.
     
     Args:
-        tariffs: Список тарифов из БД
+        tariffs: Список тарифов из БД (используется только если groups_data=None)
         back_callback: Callback для кнопки «Назад»
         order_id: ID существующего ордера (для оптимизации)
         is_cards: True если выбор тарифа для оплаты картой
         is_crypto: True если выбор тарифа для оплаты криптой (простой режим)
         is_balance: True если выбор тарифа для оплаты с баланса
+        groups_data: Список dict с ключами 'group' и 'tariffs' для группировки.
+                     Если None — tariffs отображаются без группировки.
     """
     builder = InlineKeyboardBuilder()
     
-    for tariff in tariffs:
-        if is_crypto:
-            price_usd = tariff['price_cents'] / 100
-            price_str = f"{price_usd:g}".replace('.', ',')
-            price_display = f"${price_str}"
-            prefix = "crypto_pay"
-            emoji = '💰'
-        elif is_cards:
-            price_rub = tariff.get('price_rub')
-            if price_rub is None or price_rub <= 1:
-                continue
-            price_display = f"{price_rub} ₽"
-            prefix = "cards_pay"
-            emoji = '💳'
-        elif is_balance:
-            price_rub = tariff.get('price_rub')
-            if price_rub is None or price_rub <= 1:
-                continue
-            price_display = f"{price_rub} ₽"
-            prefix = "balance_pay"
-            emoji = '💰'
-        else:
-            price_display = f"{tariff['price_stars']} звёзд"
-            prefix = "stars_pay"
-            emoji = '⭐'
+    def _add_tariff_buttons(tariff_list):
+        """Добавляет кнопки тарифов в builder."""
+        for tariff in tariff_list:
+            if is_crypto:
+                price_usd = tariff['price_cents'] / 100
+                price_str = f"{price_usd:g}".replace('.', ',')
+                price_display = f"${price_str}"
+                prefix = "crypto_pay"
+                emoji = '💰'
+            elif is_cards:
+                price_rub = tariff.get('price_rub')
+                if price_rub is None or price_rub <= 1:
+                    continue
+                price_display = f"{price_rub} ₽"
+                prefix = "cards_pay"
+                emoji = '💳'
+            elif is_balance:
+                price_rub = tariff.get('price_rub')
+                if price_rub is None or price_rub <= 1:
+                    continue
+                price_display = f"{price_rub} ₽"
+                prefix = "balance_pay"
+                emoji = '💰'
+            else:
+                price_display = f"{tariff['price_stars']} звёзд"
+                prefix = "stars_pay"
+                emoji = '⭐'
+                
+            cb_data = f"{prefix}:{tariff['id']}:{order_id}" if order_id else f"{prefix}:{tariff['id']}"
             
-        cb_data = f"{prefix}:{tariff['id']}:{order_id}" if order_id else f"{prefix}:{tariff['id']}"
-        
-        builder.row(
-            InlineKeyboardButton(
-                text=f"{emoji} {tariff['name']} — {price_display}",
-                callback_data=cb_data
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"{emoji} {tariff['name']} — {price_display}",
+                    callback_data=cb_data
+                )
             )
-        )
+    
+    if groups_data:
+        # Группированный режим: заголовки + тарифы
+        for group_item in groups_data:
+            group = group_item['group']
+            group_tariffs = group_item['tariffs']
+            
+            if not group_tariffs:
+                continue
+            
+            # Заголовок группы (кнопка-noop)
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"📂⬇ {group['name']}",
+                    callback_data="noop"
+                )
+            )
+            _add_tariff_buttons(group_tariffs)
+    else:
+        # Обычный режим без группировки
+        _add_tariff_buttons(tariffs)
     
     builder.row(
         InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback),
@@ -385,7 +410,7 @@ def my_keys_list_kb(keys: list) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def key_manage_kb(key_id: int, is_unconfigured: bool = False, is_active: bool = True) -> InlineKeyboardMarkup:
+def key_manage_kb(key_id: int, is_unconfigured: bool = False, is_active: bool = True, is_traffic_exhausted: bool = False) -> InlineKeyboardMarkup:
     """
     Клавиатура управления ключом.
     
@@ -393,6 +418,7 @@ def key_manage_kb(key_id: int, is_unconfigured: bool = False, is_active: bool = 
         key_id: ID ключа
         is_unconfigured: True, если ключ не настроен (Draft)
         is_active: True, если ключ активен (срок действия не истек)
+        is_traffic_exhausted: True, если трафик исчерпан
     """
     builder = InlineKeyboardBuilder()
     
@@ -403,6 +429,15 @@ def key_manage_kb(key_id: int, is_unconfigured: bool = False, is_active: bool = 
             InlineKeyboardButton(text="📈 Продлить", callback_data=f"key_renew:{key_id}")
         )
         builder.row(
+            InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"key_rename:{key_id}")
+        )
+    elif is_traffic_exhausted:
+        # Трафик исчерпан — только продлить и удалить
+        builder.row(
+            InlineKeyboardButton(text="📈 Продлить", callback_data=f"key_renew:{key_id}")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"key_delete:{key_id}"),
             InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"key_rename:{key_id}")
         )
     else:

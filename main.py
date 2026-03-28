@@ -15,12 +15,10 @@ from config import BOT_TOKEN
 from database.migrations import run_migrations
 
 from bot.services.vpn_api import close_all_clients
-from bot.services.scheduler import run_daily_tasks, run_update_check_scheduler
+from bot.services.scheduler import run_daily_tasks, run_update_check_scheduler, run_traffic_sync_scheduler
 
 # Импорт роутеров
-from bot.handlers.user.main import router as user_router
-from bot.handlers.user.payments import router as payments_router
-from bot.handlers.user.referral import router as referral_router
+from bot.handlers.user import router as user_router
 from bot.handlers.admin import admin_router
 
 
@@ -84,9 +82,7 @@ async def main():
     # Регистрируем роутеры
     # Порядок важен: сначала более специфичные, потом общие
     dp.include_router(admin_router)           # Админ-панель (общая)
-    dp.include_router(payments_router)        # Платежи (ДО user, чтобы /start bill1 работал)
-    dp.include_router(referral_router)        # Реферальная система
-    dp.include_router(user_router)            # Пользователь
+    dp.include_router(user_router)            # Пользователь (имеет строгий внутренний порядок)
     
     # Регистрируем startup/shutdown
     dp.startup.register(on_startup)
@@ -101,12 +97,15 @@ async def main():
     daily_tasks = asyncio.create_task(run_daily_tasks(bot))
     # Запускаем планировщик проверки обновлений
     update_tasks = asyncio.create_task(run_update_check_scheduler(bot))
+    # Запускаем планировщик синхронизации трафика (каждые 5 мин)
+    traffic_tasks = asyncio.create_task(run_traffic_sync_scheduler(bot))
     
     try:
         await dp.start_polling(bot)
     finally:
         daily_tasks.cancel()
         update_tasks.cancel()
+        traffic_tasks.cancel()
         await bot.session.close()
 
 

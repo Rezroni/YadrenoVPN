@@ -211,7 +211,11 @@ async def process_payment_order(order_id: str) -> Tuple[bool, str, Optional[Dict
         
         try:
             days = order.get('period_days') or order.get('duration_days') or 30
-            key_id = create_initial_vpn_key(order['user_id'], order['tariff_id'], days)
+            # Получаем лимит трафика из тарифа
+            from database.requests import get_tariff_by_id as _get_tariff
+            _tariff = _get_tariff(order['tariff_id'])
+            traffic_limit_bytes = (_tariff.get('traffic_limit_gb', 0) or 0) * (1024**3) if _tariff else 0
+            key_id = create_initial_vpn_key(order['user_id'], order['tariff_id'], days, traffic_limit=traffic_limit_bytes)
             
             update_payment_key_id(order_id, key_id)
             order['vpn_key_id'] = key_id
@@ -418,6 +422,7 @@ async def create_yookassa_qr_payment(
     amount_rub: float,
     order_id: str,
     description: str,
+    bot_name: str,
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -466,7 +471,7 @@ async def create_yookassa_qr_payment(
         "description": description,
         "receipt": {
             "customer": {
-                "email": f"user_{order_id}@yadreno.vpn"
+                "email": f"user_{order_id}@t.me"
             },
             "items": [
                 {

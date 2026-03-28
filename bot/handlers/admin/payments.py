@@ -129,13 +129,34 @@ async def show_payments_menu(callback: CallbackQuery, state: FSMContext):
     else:
         text += "⚪ *QR-оплата (ЮКасса прямая/СБП)*\n"
 
+    monthly_reset = get_setting('monthly_traffic_reset_enabled', '0') == '1'
+
     await callback.message.edit_text(
         text,
-        reply_markup=payments_menu_kb(stars, crypto, cards, qr),
+        reply_markup=payments_menu_kb(stars, crypto, cards, qr, monthly_reset),
         parse_mode="Markdown",
         disable_web_page_preview=True
     )
     await callback.answer()
+
+
+# ============================================================================
+# TOGGLE MONTHLY RESET
+# ============================================================================
+
+@router.callback_query(F.data == "admin_toggle_monthly_reset")
+async def toggle_monthly_reset(callback: CallbackQuery, state: FSMContext):
+    """Переключение автосброса трафика 1-го числа."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    current = get_setting('monthly_traffic_reset_enabled', '0')
+    new_val = '0' if current == '1' else '1'
+    set_setting('monthly_traffic_reset_enabled', new_val)
+    
+    # Перерисовываем меню оплат
+    await show_payments_menu(callback, state)
 
 
 # ============================================================================
@@ -198,11 +219,9 @@ async def start_crypto_setup(callback: CallbackQuery, state: FSMContext):
     instructions = (
         "*Режим «Простой» (рекомендуется):*\n"
         "1️⃣ В @Ya\\_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
-        "2️⃣ Выберите тип позиции: *Счет*\n"
-        "3️⃣ Укажите Обратную ссылку (Интеграция → Изменить): \n"
-        f"`{callback_url}`\n\n"
-        "🚫 *НЕ ДЕЛАЙТЕ КАК ПОКАЗАНО НА ВИДЕО!*\n"
-        "В видео показан режим «Товар» — он вам НЕ подходит.\n\n"
+        "2️⃣ Выберите тип позиции: *Счет*\n\n"
+        "🎬 *Актуальная инструкция как добавлять:*\n"
+        "[Смотреть видео](https://youtu.be/cK0wX2LKxcs)\n\n"
         "⚠️ *ВАЖНО:*\n"
         "• Тип позиции — именно *Счет*, а НЕ *Товар*!\n"
         "• Тарифы добавлять к позиции *НЕ нужно* — в режиме «Счет» их нельзя туда добавить.\n"
@@ -211,9 +230,7 @@ async def start_crypto_setup(callback: CallbackQuery, state: FSMContext):
         "*Режим «Стандартный»:*\n"
         "1️⃣ Создайте обычный *Товар* в @Ya\\_SellerBot\n"
         "2️⃣ Добавьте в него тарифы (под номерами 1-9)\n"
-        "3️⃣ В настройках позиции укажите Обратную ссылку: \n"
-        f"`{callback_url}`\n\n"
-        "4️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
+        "3️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
         "🎬 Процесс добавления товара показан в [видео-инструкции](https://www.youtube.com/watch?v=MYRTzvIkbi0).\n\n"
     )
 
@@ -290,11 +307,17 @@ async def process_crypto_url(message: Message, state: FSMContext):
         # Переходим к вводу секретного ключа
         await state.set_state(AdminStates.crypto_setup_secret)
         
+        bot_username = message.bot.my_username if hasattr(message.bot, 'my_username') else "YOUR_BOT"
+        callback_url = f"https://t.me/{bot_username}"
+
         safe_url = escape_markdown_url(url)
         await message.answer(
             f"✅ Ссылка принята!\n[{url}]({safe_url})\n\n"
-            "Теперь введите *Секретный ключ*:\n"
-            "Найти его можно в @Ya\\_SellerBot: Профиль → Ключ подписи",
+            "🔔 *Настройка уведомлений:*\n"
+            "В @Ya\\_SellerBot зайдите в настройки вашей созданной позиции → `Уведомления` → `Обратная ссылка` и укажите этот адрес:\n"
+            f"`{callback_url}`\n\n"
+            "🔑 *Ожидаю ввода секретного ключа:*\n"
+            "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`.",
             reply_markup=crypto_setup_kb(2),
             disable_web_page_preview=True,
             parse_mode="Markdown"
@@ -527,11 +550,9 @@ async def crypto_mgmt_edit_url(callback: CallbackQuery, state: FSMContext):
     instructions = (
         "*Режим «Простой» (Счет):*\n"
         "1️⃣ В @Ya\\_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
-        "2️⃣ Выберите тип позиции: *Счет*\n"
-        "3️⃣ В настройках позиции (🔔 Уведомления - 🔗 Обратная ссылка) укажите ссылку: \n"
-        f"`{callback_url}`\n\n"
-        "🚫 *НЕ ДЕЛАЙТЕ КАК ПОКАЗАНО НА ВИДЕО!*\n"
-        "В видео показан режим «Товар» — он вам НЕ подходит.\n\n"
+        "2️⃣ Выберите тип позиции: *Счет*\n\n"
+        "🎬 *Актуальная инструкция как добавлять:*\n"
+        "[Смотреть видео](https://youtu.be/cK0wX2LKxcs)\n\n"
         "⚠️ *ВАЖНО:*\n"
         "• Тип позиции — именно *Счет*, а НЕ *Товар*!\n"
         "• Тарифы добавлять к позиции *НЕ нужно* — в режиме «Счет» их нельзя туда добавить.\n"
@@ -540,9 +561,7 @@ async def crypto_mgmt_edit_url(callback: CallbackQuery, state: FSMContext):
         "*Режим «Стандартный» (Товар):*\n"
         "1️⃣ Создайте обычный *Товар* в @Ya\\_SellerBot\n"
         "2️⃣ Добавьте в него тарифы (под номерами 1-9)\n"
-        "3️⃣ В настройках позиции (🔔 Уведомления - 🔗 Обратная ссылка) укажите ссылку: \n"
-        f"`{callback_url}`\n\n"
-        "4️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
+        "3️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
         "🎬 Процесс добавления товара показан в [видео-инструкции](https://www.youtube.com/watch?v=MYRTzvIkbi0).\n\n"
     )
     
@@ -581,10 +600,16 @@ async def crypto_mgmt_edit_secret(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.crypto_setup_secret)
     await state.update_data(edit_mode=True)
     
+    bot_username = callback.bot.my_username if hasattr(callback.bot, 'my_username') else "YOUR_BOT"
+    callback_url = f"https://t.me/{bot_username}"
+
     text = (
         "🔐 *Изменение секретного ключа*\n\n"
-        "Введите новый секретный ключ:\n"
-        "Найти его можно в @Ya\\_SellerBot: Профиль → Ключ подписи"
+        "🔔 *Настройка уведомлений:*\n"
+        "В @Ya\\_SellerBot зайдите в настройки вашей созданной позиции → `Уведомления` → `Обратная ссылка` и укажите этот адрес:\n"
+        f"`{callback_url}`\n\n"
+        "🔑 *Ожидаю ввода нового секретного ключа:*\n"
+        "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`."
     )
     
     await callback.message.edit_text(

@@ -12,8 +12,23 @@ import string
 
 logger = logging.getLogger(__name__)
 
+
+def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
+    """
+    Добавляет колонку в таблицу, игнорируя ошибку если колонка уже существует.
+    Используется в миграциях для идемпотентного добавления колонок.
+    """
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            logger.info(f"Колонка {column_def.split()[0]} уже существует в {table} — пропускаем")
+        else:
+            raise
+
+
 # Текущая версия схемы БД
-LATEST_VERSION = 12
+LATEST_VERSION = 13
 
 
 def get_current_version() -> int:
@@ -719,6 +734,113 @@ def migration_12(conn: sqlite3.Connection) -> None:
     logger.info("Миграция v12 применена")
 
 
+def migration_13(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v13: Система управления трафиком + Группы тарифов (объединённая).
+    
+    Трафик:
+    - tariffs.traffic_limit_gb: лимит трафика для тарифа (0 = безлимит)
+    - vpn_keys.traffic_used: кешированный израсходованный трафик (байты)
+    - vpn_keys.traffic_limit: лимит трафика ключа (байты, копируется из тарифа)
+    - vpn_keys.traffic_updated_at: время последнего обновления кеша трафика
+    - vpn_keys.traffic_notified_pct: последний порог уведомления (100 = не уведомляли)
+    - settings.traffic_notification_text: шаблон уведомления о трафике
+    - settings.monthly_traffic_reset_enabled: ежемесячный автосброс (0/1)
+    
+    Группы тарифов:
+    - tariff_groups: таблица групп (id, name, sort_order, created_at)
+    - Запись "Основная" (id=1, sort_order=1) — группа по умолчанию
+    - tariffs.group_id: привязка тарифа к группе (один тариф → одна группа)
+    - server_groups: таблица связи серверов и групп (many-to-many)
+      Один сервер может входить в любое количество групп.
+    
+    Ключи не получают отдельного поля group_id — группа ключа определяется
+    через привязанный тариф (vpn_keys.tariff_id → tariffs.group_id).
+    """
+    logger.info("Применение миграции v13 (Трафик + Группы тарифов)...")
+
+    # ── Трафик ─────────────────────────────────────────────────────────────────
+
+    # Лимит трафика в тарифах (0 = безлимит)
+    _add_column(conn, "tariffs", "traffic_limit_gb INTEGER DEFAULT 0")
+
+    # Заполняем существующие тарифы значением из конфига (1 TB = 1024 ГБ)
+    conn.execute("UPDATE tariffs SET traffic_limit_gb = 1024 WHERE traffic_limit_gb = 0")
+
+    # Кеш трафика в ключах
+    _add_column(conn, "vpn_keys", "traffic_used INTEGER DEFAULT 0")
+    _add_column(conn, "vpn_keys", "traffic_limit INTEGER DEFAULT 0")
+    _add_column(conn, "vpn_keys", "traffic_updated_at DATETIME")
+
+    # Заполняем traffic_limit для существующих ключей из их тарифов
+    conn.execute("""
+        UPDATE vpn_keys SET traffic_limit = (
+            SELECT COALESCE(t.traffic_limit_gb, 0) * 1024 * 1024 * 1024
+            FROM tariffs t WHERE t.id = vpn_keys.tariff_id
+        )
+        WHERE tariff_id IS NOT NULL AND traffic_limit = 0
+    """)
+
+    # Последний порог уведомления о трафике (100 = ещё не уведомляли)
+    _add_column(conn, "vpn_keys", "traffic_notified_pct INTEGER DEFAULT 100")
+
+    # Шаблон уведомления о трафике
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+        ('traffic_notification_text',
+         '⚠️ По ключу *{keyname}* осталось {percent}% трафика ({used} из {limit})')
+    )
+
+    # Настройка ежемесячного автосброса трафика
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+        ('monthly_traffic_reset_enabled', '0')
+    )
+
+    # ── Группы тарифов ─────────────────────────────────────────────────────────
+
+    # Таблица групп тарифов
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tariff_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,              -- Название группы (видно пользователю)
+            sort_order INTEGER DEFAULT 1,    -- Порядок сортировки (1-99)
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Создаём группу «Основная» по умолчанию (id=1)
+    conn.execute("""
+        INSERT OR IGNORE INTO tariff_groups (id, name, sort_order)
+        VALUES (1, 'Основная', 1)
+    """)
+
+    # Привязка тарифов к группе (один тариф → одна группа)
+    _add_column(conn, "tariffs", "group_id INTEGER DEFAULT 1")
+    conn.execute("UPDATE tariffs SET group_id = 1 WHERE group_id IS NULL")
+    logger.info("Колонка group_id проверена в таблице tariffs")
+
+    # Таблица связи серверов с группами (many-to-many)
+    # Один сервер может входить в любое количество групп.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS server_groups (
+            server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+            group_id  INTEGER NOT NULL REFERENCES tariff_groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (server_id, group_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_server_groups_group ON server_groups(group_id)")
+
+    # Все существующие серверы добавляем в группу «Основная» (id=1)
+    conn.execute("""
+        INSERT OR IGNORE INTO server_groups (server_id, group_id)
+        SELECT id, 1 FROM servers
+    """)
+    logger.info("Таблица server_groups создана, все серверы добавлены в группу 'Основная'")
+
+    logger.info("Миграция v13 применена")
+
+
 MIGRATIONS = {
     1: migration_1,
     2: migration_2,
@@ -732,6 +854,7 @@ MIGRATIONS = {
     10: migration_10,
     11: migration_11,
     12: migration_12,
+    13: migration_13,
 }
 
 

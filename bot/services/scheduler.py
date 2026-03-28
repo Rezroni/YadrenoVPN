@@ -1,9 +1,11 @@
 """
-Модуль для ежедневных автоматических задач.
+Модуль для автоматических задач.
 
 Включает:
 - Отправку суточной статистики администраторам
 - Создание и отправку архива с бэкапами (БД бота + VPN панелей)
+- Синхронизацию трафика с VPN-серверами (каждые 5 минут)
+- Уведомления о заканчивающемся трафике
 """
 
 import asyncio
@@ -358,6 +360,10 @@ async def run_daily_tasks(bot: Bot) -> None:
             # Отправляем уведомления пользователям
             await check_and_send_expiry_notifications(bot)
             
+            # Ежемесячный сброс трафика (1-е число каждого месяца)
+            if datetime.now().day == 1:
+                await monthly_traffic_reset(bot)
+            
             # Ждём немного чтобы не запуститься повторно в ту же минуту
             await asyncio.sleep(60)
             
@@ -386,9 +392,13 @@ async def check_and_notify_updates(bot: Bot) -> None:
         
     try:
         # Проверяем обновления
-        success, commits_behind, log_text = check_for_updates()
+        success, commits_behind, log_text, has_blocking, blocking_commit, is_beta_only = check_for_updates()
         
         if success and commits_behind > 0:
+            if is_beta_only:
+                logger.info(f"📦 Найдено {commits_behind} новых коммитов, но все они бета-версии (начинаются с '?'). Уведомление не отправляется.")
+                return
+                
             logger.info(f"📦 Найдено {commits_behind} новых коммитов")
             
             # Кнопка обновления (та же callback_data, что в админке)
@@ -402,12 +412,20 @@ async def check_and_notify_updates(bot: Bot) -> None:
             
             kb = builder.as_markup()
             
+            # Формируем текст уведомления
+            notify_text = f"📦 *Доступно обновление!*\n\n{log_text}"
+            
+            # Если есть блокирующий коммит — добавляем предупреждение
+            if has_blocking and blocking_commit:
+                blocking_msg = blocking_commit['message'].lstrip('!')
+                notify_text += f"\n\n⚠️ Среди обновлений есть *блокирующий коммит* — обновление нужно выполнять вручную.\n`{blocking_msg}`"
+            
             # Отправляем уведомления админам
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(
                         chat_id=admin_id,
-                        text=f"📦 *Доступно обновление!*\n\n{log_text}",
+                        text=notify_text,
                         reply_markup=kb,
                         parse_mode="Markdown"
                     )
@@ -454,3 +472,322 @@ async def run_update_check_scheduler(bot: Bot) -> None:
             # Ждём час и пробуем снова
             await asyncio.sleep(3600)
 
+
+# ============================================================================
+# СИНХРОНИЗАЦИЯ ТРАФИКА (каждые 5 минут)
+# ============================================================================
+
+# Пороги уведомлений о трафике (% оставшегося трафика)
+TRAFFIC_THRESHOLDS = [10, 5, 3, 2, 1, 0]
+
+
+async def monthly_traffic_reset(bot: Bot) -> None:
+    """
+    Ежемесячный сброс трафика (1-е число каждого месяца).
+    
+    Проверяет настройку monthly_traffic_reset_enabled.
+    Сбрасывает счётчики up/down на серверах, восстанавливает полный лимит,
+    обнуляет traffic_used и traffic_notified_pct в БД.
+    Отправляет отчёт админам.
+    
+    Args:
+        bot: Экземпляр бота
+    """
+    from database.requests import (
+        get_all_active_keys_with_server,
+        reset_key_traffic_notification,
+        update_key_traffic_limit,
+        get_tariff_by_id
+    )
+    
+    # Проверяем настройку
+    if get_setting('monthly_traffic_reset_enabled', '0') != '1':
+        logger.info("🔄 Ежемесячный сброс трафика отключён")
+        return
+    
+    logger.info("🔄 Запуск ежемесячного сброса трафика...")
+    
+    keys = get_all_active_keys_with_server()
+    if not keys:
+        logger.info("🔄 Нет активных ключей для сброса")
+        return
+    
+    # Фильтруем ключи с лимитом трафика
+    keys_with_limit = [k for k in keys if (k.get('traffic_limit', 0) or 0) > 0]
+    
+    if not keys_with_limit:
+        logger.info("🔄 Нет ключей с лимитом трафика")
+        return
+    
+    # Группируем по серверам
+    keys_by_server: dict = {}
+    for key in keys_with_limit:
+        sid = key['server_id']
+        if sid not in keys_by_server:
+            keys_by_server[sid] = []
+        keys_by_server[sid].append(key)
+    
+    servers = get_all_servers()
+    server_map = {s['id']: s for s in servers}
+    
+    success_count = 0
+    error_count = 0
+    
+    for server_id, server_keys in keys_by_server.items():
+        server = server_map.get(server_id)
+        if not server or not server.get('is_active'):
+            continue
+        
+        try:
+            client = get_client_from_server_data(server)
+            
+            for key in server_keys:
+                email = key.get('panel_email')
+                inbound_id = key.get('panel_inbound_id')
+                client_uuid = key.get('client_uuid')
+                traffic_limit = key.get('traffic_limit', 0) or 0
+                
+                if not email or not inbound_id or not client_uuid:
+                    logger.warning(f"Ключ ID {key['id']}: нет данных для сброса (email={email}, inbound={inbound_id})")
+                    continue
+                
+                try:
+                    # 1. Сброс счётчиков up/down на сервере
+                    await client.reset_client_traffic(inbound_id, email)
+                    
+                    # 2. Восстановление полного лимита тарифа
+                    # Берём лимит из тарифа, а не из ключа (ключ мог быть уменьшен при замене)
+                    tariff_limit = traffic_limit
+                    tariff_id = key.get('tariff_id')
+                    if tariff_id:
+                        tariff = get_tariff_by_id(tariff_id)
+                        if tariff and (tariff.get('traffic_limit_gb', 0) or 0) > 0:
+                            tariff_limit = tariff['traffic_limit_gb'] * (1024**3)
+                    
+                    await client.update_client_limit(
+                        inbound_id=inbound_id,
+                        client_uuid=client_uuid,
+                        email=email,
+                        total_gb_bytes=tariff_limit
+                    )
+                    
+                    # 3. Обнуление в БД
+                    update_key_traffic_limit(key['id'], tariff_limit)
+                    reset_key_traffic_notification(key['id'])
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"Ошибка сброса трафика для ключа {key['id']} ({email}): {e}")
+        
+        except Exception as e:
+            error_count += len(server_keys)
+            logger.error(f"Ошибка подключения к серверу {server.get('name', server_id)} при сбросе трафика: {e}")
+    
+    # Отчёт админам
+    month_name = datetime.now().strftime('%B %Y')
+    report = (
+        f"🔄 *Ежемесячный сброс трафика*\n\n"
+        f"✅ Успешно: {success_count}\n"
+    )
+    if error_count > 0:
+        report += f"❌ Ошибок: {error_count}\n"
+    report += f"\nВсего ключей с лимитом: {len(keys_with_limit)}"
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(chat_id=admin_id, text=report, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Не удалось отправить отчёт о сбросе админу {admin_id}: {e}")
+    
+    logger.info(f"✅ Ежемесячный сброс трафика завершён: {success_count} успешно, {error_count} ошибок")
+
+
+async def sync_traffic_stats(bot: Bot) -> None:
+    """
+    Опрашивает все серверы и обновляет кеш трафика для каждого ключа.
+    Проверяет пороги уведомлений и отправляет уведомления пользователям.
+    
+    Graceful degradation: при недоступности сервера — логируем WARNING,
+    не обнуляем трафик, продолжаем обработку остальных серверов.
+    """
+    from database.requests import (
+        get_all_active_keys_with_server, bulk_update_traffic,
+        update_key_notified_pct, get_setting
+    )
+    
+    keys = get_all_active_keys_with_server()
+    if not keys:
+        return
+    
+    # Группируем ключи по серверам
+    keys_by_server: dict = {}
+    for key in keys:
+        sid = key['server_id']
+        if sid not in keys_by_server:
+            keys_by_server[sid] = []
+        keys_by_server[sid].append(key)
+    
+    # Получаем серверы
+    servers = get_all_servers()
+    server_map = {s['id']: s for s in servers}
+    
+    # Собираем обновления трафика
+    traffic_updates = []  # (traffic_used, key_id)
+    
+    for server_id, server_keys in keys_by_server.items():
+        server = server_map.get(server_id)
+        if not server or not server.get('is_active'):
+            continue
+        
+        try:
+            client = get_client_from_server_data(server)
+            inbounds = await client.get_inbounds()
+            
+            # Строим словарь email -> {total, used} из всех inbounds
+            stats_map = {}
+            for inbound in inbounds:
+                for stats in inbound.get("clientStats", []):
+                    email = stats.get("email")
+                    if email:
+                        stats_map[email] = {
+                            'total': stats.get('total', 0),
+                            'up': stats.get('up', 0),
+                            'down': stats.get('down', 0),
+                        }
+            
+            # Сопоставляем с ключами — «умная» формула через остаток
+            for key in server_keys:
+                email = key.get('panel_email')
+                if email and email in stats_map:
+                    s = stats_map[email]
+                    used_on_server = s['up'] + s['down']
+                    total_on_server = s['total']
+                    traffic_limit = key.get('traffic_limit', 0) or 0
+                    
+                    if traffic_limit > 0 and total_on_server > 0:
+                        # Формула: сколько осталось на сервере → вычитаем из нашего лимита
+                        remaining_on_server = max(0, total_on_server - used_on_server)
+                        traffic_used = max(0, traffic_limit - remaining_on_server)
+                        
+                        # Автоисправление: если totalGB на сервере расходится
+                        # с ожидаемым remaining (traffic_limit - traffic_used из БД) > 1 МБ
+                        db_traffic_used = key.get('traffic_used', 0) or 0
+                        expected_remaining = max(0, traffic_limit - db_traffic_used)
+                        divergence = abs(total_on_server - expected_remaining)
+                        if divergence > 1024 * 1024:  # > 1 МБ
+                            try:
+                                correct_remaining = max(0, traffic_limit - db_traffic_used)
+                                inbound_id = key.get('panel_inbound_id')
+                                client_uuid = key.get('client_uuid')
+                                if inbound_id and client_uuid:
+                                    await client.update_client_limit(
+                                        inbound_id=inbound_id,
+                                        client_uuid=client_uuid,
+                                        email=email,
+                                        total_gb_bytes=correct_remaining
+                                    )
+                                    logger.info(f"Автоисправление totalGB для {email}: {total_on_server} → {correct_remaining}")
+                            except Exception as fix_e:
+                                logger.warning(f"Не удалось автоисправить totalGB для {email}: {fix_e}")
+                    else:
+                        # Безлимит или нет данных — прямой учёт
+                        traffic_used = used_on_server
+                    
+                    traffic_updates.append((traffic_used, key['id']))
+                    key['_new_traffic_used'] = traffic_used
+        
+        except Exception as e:
+            # Graceful degradation: не трогаем данные, продолжаем
+            logger.warning(f"⚠️ Синхронизация трафика: сервер {server.get('name', server_id)} недоступен: {e}")
+            continue
+    
+    # Массовое обновление трафика в БД
+    if traffic_updates:
+        bulk_update_traffic(traffic_updates)
+    
+    # Проверяем пороги уведомлений
+    notification_text_template = get_setting(
+        'traffic_notification_text',
+        '⚠️ По ключу *{keyname}* осталось {percent}% трафика ({used} из {limit})'
+    )
+    
+    for key in keys:
+        traffic_limit = key.get('traffic_limit', 0) or 0
+        if traffic_limit == 0:
+            continue  # Безлимит — пропускаем
+        
+        # Используем обновлённое значение или из БД
+        traffic_used = key.get('_new_traffic_used', key.get('traffic_used', 0) or 0)
+        notified_pct = key.get('traffic_notified_pct', 100)
+        
+        # Вычисляем оставшийся процент
+        remaining_pct = max(0, (1 - traffic_used / traffic_limit) * 100)
+        
+        # Проверяем пороги
+        for threshold in TRAFFIC_THRESHOLDS:
+            if remaining_pct <= threshold and notified_pct > threshold:
+                # Отправляем уведомление
+                telegram_id = key.get('telegram_id')
+                if telegram_id:
+                    # Формируем имя ключа
+                    if key.get('custom_name'):
+                        keyname = key['custom_name']
+                    elif key.get('client_uuid'):
+                        uuid = key['client_uuid']
+                        keyname = f"{uuid[:4]}...{uuid[-4:]}" if len(uuid) >= 8 else uuid
+                    else:
+                        keyname = f"Ключ #{key['id']}"
+                    
+                    msg = notification_text_template.format(
+                        keyname=keyname,
+                        percent=threshold,
+                        used=format_traffic(traffic_used),
+                        limit=format_traffic(traffic_limit)
+                    )
+                    
+                    try:
+                        await bot.send_message(
+                            chat_id=telegram_id,
+                            text=msg,
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Не удалось отправить уведомление о трафике пользователю {telegram_id}: {e}")
+                
+                # Обновляем порог в БД
+                update_key_notified_pct(key['id'], threshold)
+                key['traffic_notified_pct'] = threshold
+                break  # Только одно уведомление за раз
+    
+    logger.debug(f"Синхронизация трафика завершена: обновлено {len(traffic_updates)} ключей")
+
+
+async def run_traffic_sync_scheduler(bot: Bot) -> None:
+    """
+    Фоновая задача для синхронизации трафика каждые 5 минут.
+    Не заменяет существующие ежедневные задачи.
+    
+    Args:
+        bot: Экземпляр бота
+    """
+    logger.info("📊 Планировщик синхронизации трафика запущен (каждые 5 мин)")
+    
+    # Первый запуск через 30 секунд после старта бота
+    await asyncio.sleep(30)
+    
+    while True:
+        try:
+            await sync_traffic_stats(bot)
+            
+            # Ждём 5 минут
+            await asyncio.sleep(300)
+            
+        except asyncio.CancelledError:
+            logger.info("Планировщик синхронизации трафика остановлен")
+            break
+        except Exception as e:
+            logger.error(f"Ошибка в планировщике синхронизации трафика: {e}")
+            # Ждём 2 минуты и пробуем снова
+            await asyncio.sleep(120)

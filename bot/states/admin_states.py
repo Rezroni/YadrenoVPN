@@ -64,7 +64,8 @@ class AdminStates(StatesGroup):
     add_tariff_price_stars = State() # Шаг 3: Цена в звёздах
     add_tariff_price_rub = State()   # Шаг 4: Цена в рублях (карты)
     add_tariff_duration = State()    # Шаг 5: Длительность
-    add_tariff_external_id = State() # Шаг 6: ID тарифа в Ya.Seller (1-9)
+    add_tariff_traffic_limit = State() # Шаг 6: Лимит трафика (ГБ)
+    add_tariff_external_id = State() # Шаг 7: ID тарифа в Ya.Seller (1-9)
     add_tariff_confirm = State()     # Подтверждение
 
     # ========== Редактирование тарифа ==========
@@ -93,6 +94,12 @@ class AdminStates(StatesGroup):
     add_key_traffic = State()        # Ввод лимита трафика (ГБ)
     add_key_days = State()           # Ввод срока действия (дней)
     add_key_confirm = State()        # Подтверждение создания
+    
+    # ========== Управление группами тарифов ==========
+    group_add_name = State()         # Ввод названия новой группы
+    group_edit_name = State()        # Ввод нового названия группы
+    tariff_select_group = State()    # Выбор группы при добавлении тарифа
+    server_select_group = State()    # Выбор группы при добавлении сервера
 
 
 # ============================================================================
@@ -189,11 +196,20 @@ TARIFF_PARAMS = [
     {
         "key": "duration_days",
         "label": "Длительность",
-        "hint": "в днях (1-365)",
-        "validate": lambda x: x.isdigit() and 1 <= int(x) <= 365,
-        "error": "Длительность от 1 до 365 дней",
+        "hint": "в днях (1-99999)",
+        "validate": lambda x: x.isdigit() and 1 <= int(x) <= 99999,
+        "error": "Длительность от 1 до 99999 дней",
         "convert": int,
         "format": lambda x: f"{x} дн."
+    },
+    {
+        "key": "traffic_limit_gb",
+        "label": "Лимит трафика (ГБ)",
+        "hint": "0 = безлимит, иначе число ГБ",
+        "validate": lambda x: x.isdigit() and 0 <= int(x) <= 99999,
+        "error": "Введите число от 0 до 99999 (0 = безлимит)",
+        "convert": int,
+        "format": lambda x: f"{x} ГБ" if x > 0 else "Безлимит"
     },
     {
         "key": "external_id",
@@ -202,7 +218,7 @@ TARIFF_PARAMS = [
         "validate": lambda x: x.isdigit() and 1 <= int(x) <= 9,
         "error": "ID тарифа от 1 до 9",
         "convert": int,
-        "crypto_only": True,  # Показывать только если включены крипто-платежи
+        "crypto_only": True,
         "help": (
             "💡 Это номер тарифа в карточке товара Ya.Seller.\n"
             "По нему бот понимает, за какой именно тариф поступила оплата.\n"

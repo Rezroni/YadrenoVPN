@@ -21,6 +21,8 @@ from bot.utils.git_utils import (
     set_remote_url,
     check_for_updates,
     pull_updates,
+    pull_to_commit,
+    force_pull_updates,
     get_last_commit_info,
     get_previous_commits_info,
     restart_bot,
@@ -28,6 +30,7 @@ from bot.utils.git_utils import (
 from bot.keyboards.admin import (
     bot_settings_kb,
     update_confirm_kb,
+    force_overwrite_confirm_kb,
     stop_bot_confirm_kb,
     back_and_home_kb,
     admin_logs_menu_kb,
@@ -73,6 +76,9 @@ async def show_bot_settings(callback: CallbackQuery, state: FSMContext):
 
 
 
+
+
+
 # ============================================================================
 # ОБНОВЛЕНИЕ БОТА
 # ============================================================================
@@ -109,7 +115,7 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     )
     
     # Проверяем наличие обновлений
-    success, commits_behind, log_text = check_for_updates()
+    success, commits_behind, log_text, has_blocking, blocking_commit, is_beta_only = check_for_updates()
     
     if not success:
         await callback.message.edit_text(
@@ -136,6 +142,12 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     if previous_commits != "Нет предыдущих коммитов":
          commits_text += f"\n🔸 *Предыдущие 5 коммитов:*\n```\n{previous_commits}\n```"
     
+    # Сохраняем данные о блокирующем коммите в FSM state
+    await state.update_data(
+        has_blocking=has_blocking,
+        blocking_commit=blocking_commit
+    )
+    
     # Если обновлений нет
     if commits_behind == 0:
         await callback.message.edit_text(
@@ -145,15 +157,45 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
             reply_markup=update_confirm_kb(has_updates=False),
             parse_mode="Markdown"
         )
+    elif has_blocking and blocking_commit:
+        # Есть блокирующее обновление — показываем предупреждение
+        # Убираем маркер ! из сообщения при отображении
+        blocking_msg = blocking_commit['message'].lstrip('!')
+        blocking_hash = blocking_commit['hash'][:8]
+        
+        await callback.message.edit_text(
+            f"⚠️ *Блокирующее обновление!*\n\n"
+            f"📦 *Доступно обновлений:* {commits_behind}\n"
+            f"Текущая версия: `{commit_hash}`\n\n"
+            f"🚫 Среди обновлений найден *блокирующий коммит* `{blocking_hash}`:\n"
+            f"```\n{blocking_msg}\n```\n\n"
+            f"Будет установлен *только этот коммит*. "
+            f"После перезапуска вам потребуется выполнить требуемые действия, "
+            f"прежде чем обновляться дальше.\n\n"
+            f"{commits_text}",
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=True),
+            parse_mode="Markdown"
+        )
+    elif is_beta_only:
+        # Только бета-обновления
+        await callback.message.edit_text(
+            f"🧪 *Доступна бета-версия!*\n\n"
+            f"📦 *Доступно бета-коммитов:* {commits_behind}\n"
+            f"Текущая версия: `{commit_hash}`\n\n"
+            f"{commits_text}\n\n"
+            "⚠️ Это тестовая версия. Устанавливайте на свой страх и риск.",
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=True),
+            parse_mode="Markdown"
+        )
     else:
-        # Есть обновления
+        # Есть обычные обновления
         await callback.message.edit_text(
             f"📦 *Доступно обновлений:* {commits_behind}\n\n"
             f"Текущая версия: `{commit_hash}`\n\n"
             f"{commits_text}\n\n"
             "⚠️ После обновления бот автоматически перезапустится.\n"
             "Это займёт несколько секунд.",
-            reply_markup=update_confirm_kb(has_updates=True),
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=False),
             parse_mode="Markdown"
         )
     
@@ -172,14 +214,29 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
     if current_remote != GITHUB_REPO_URL:
         set_remote_url(GITHUB_REPO_URL)
     
-    await callback.message.edit_text(
-        "🔄 *Обновление...*\n\n"
-        "Загружаю изменения с GitHub...",
-        parse_mode="Markdown"
-    )
+    # Получаем данные о блокирующем коммите из FSM state
+    data = await state.get_data()
+    has_blocking = data.get('has_blocking', False)
+    blocking_commit = data.get('blocking_commit')
     
-    # Выполняем git pull
-    success, message = pull_updates()
+    if has_blocking and blocking_commit:
+        # Блокирующее обновление — обновляем до конкретного коммита
+        await callback.message.edit_text(
+            "🔄 *Блокирующее обновление...*\n\n"
+            f"Обновляю до коммита `{blocking_commit['hash'][:8]}`...",
+            parse_mode="Markdown"
+        )
+        
+        success, message = pull_to_commit(blocking_commit['hash'])
+    else:
+        # Обычное обновление — git pull
+        await callback.message.edit_text(
+            "🔄 *Обновление...*\n\n"
+            "Загружаю изменения с GitHub...",
+            parse_mode="Markdown"
+        )
+        
+        success, message = pull_updates()
     
     if not success:
         await callback.message.edit_text(
@@ -190,11 +247,100 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     
-    # Успешное обновление - показываем лог и перезапускаем
+    # Успешное обновление — показываем лог и перезапускаем
     logger.info(f"🔄 Бот обновлён администратором {callback.from_user.id}")
     
+    if has_blocking:
+        await callback.message.edit_text(
+            f"✅ *Блокирующее обновление завершено!*\n\n{message}\n\n"
+            "⚠️ После перезапуска выполните требуемые действия перед следующим обновлением.\n\n"
+            "🔄 Перезапуск бота через 2 секунды...",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.message.edit_text(
+            f"✅ *Обновление завершено!*\n\n{message}\n\n"
+            "🔄 Перезапуск бота через 2 секунды...",
+            parse_mode="Markdown"
+        )
+    
+    await callback.answer("Бот перезапускается...", show_alert=True)
+    
+    # Очищаем FSM state
+    await state.clear()
+    
+    # Даём время на отправку сообщения
+    await asyncio.sleep(2)
+    
+    # Перезапускаем бота
+    restart_bot()
+
+
+
+@router.callback_query(F.data == "admin_force_overwrite")
+async def show_force_overwrite(callback: CallbackQuery, state: FSMContext):
+    """Показывает предупреждение перед принудительной перезаписью."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    # Проверяем настроен ли GitHub
+    if not GITHUB_REPO_URL:
+        await callback.message.edit_text(
+            "❌ *GitHub не настроен*\n\n"
+            "Укажите URL репозитория в файле `config.py`:\n"
+            "`GITHUB_REPO_URL = \"https://github.com/user/repo.git\"`",
+            reply_markup=back_and_home_kb("admin_bot_settings"),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+        
     await callback.message.edit_text(
-        f"✅ *Обновление завершено!*\n\n{message}\n\n"
+        "⚠️ *ПРИНУДИТЕЛЬНАЯ ПЕРЕЗАПИСЬ*\n\n"
+        f"Все файлы бота (кроме конфигурации и баз данных) будут перезаписаны оригинальными файлами из репозитория:\n`{GITHUB_REPO_URL}`\n\n"
+        "🛑 *Внимание: Все ваши локальные изменения в коде будут безвозвратно потеряны!*\n\n"
+        "Вы действительно хотите продолжить?",
+        reply_markup=force_overwrite_confirm_kb(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_force_overwrite_confirm")
+async def force_overwrite_confirmed(callback: CallbackQuery, state: FSMContext):
+    """Выполняет принудительную перезапись и перезапуск бота."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    # Проверяем и обновляем remote URL если нужно
+    current_remote = get_remote_url()
+    if current_remote != GITHUB_REPO_URL and GITHUB_REPO_URL:
+        set_remote_url(GITHUB_REPO_URL)
+    
+    await callback.message.edit_text(
+        "🔄 *Принудительная перезапись...*\n\n"
+        "Связываюсь с репозиторием и перезаписываю файлы. Пожалуйста, подождите...",
+        parse_mode="Markdown"
+    )
+    
+    # Выполняем принудительный git fetch и reset
+    success, message = force_pull_updates()
+    
+    if not success:
+        await callback.message.edit_text(
+            f"❌ *Ошибка перезаписи*\n\n{message}",
+            reply_markup=back_and_home_kb("admin_bot_settings"),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    logger.info(f"🔄 Бот принудительно перезаписан администратором {callback.from_user.id}")
+    
+    await callback.message.edit_text(
+        f"✅ *Успешно!*\n\n{message}\n\n"
         "🔄 Перезапуск бота через 2 секунды...",
         parse_mode="Markdown"
     )
