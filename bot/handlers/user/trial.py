@@ -11,7 +11,7 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -33,7 +33,7 @@ async def show_trial_subscription(callback: CallbackQuery):
         await callback.answer('ℹ️ Вы уже использовали пробный период', show_alert=True)
         return
     trial_text = get_setting('trial_page_text', '🎁 *Пробная подписка*')
-    await callback.message.edit_text(trial_text, reply_markup=trial_sub_kb(), parse_mode='MarkdownV2')
+    await safe_edit_or_send(callback.message, trial_text, reply_markup=trial_sub_kb(), parse_mode='MarkdownV2')
     await callback.answer()
 
 @router.callback_query(F.data == 'trial_activate')

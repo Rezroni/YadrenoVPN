@@ -18,6 +18,7 @@ def users_menu_kb(stats: Dict[str, int]) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text='🔍 Выбрать пользователя', callback_data='admin_users_select'))
     builder.row(InlineKeyboardButton(text='📤 Выгрузить в панель (БД → Панель)', callback_data='admin_sync_db_to_panel'))
     builder.row(InlineKeyboardButton(text='📥 Загрузить из панели (Панель → БД)', callback_data='admin_sync_panel_to_db'))
+    builder.row(InlineKeyboardButton(text='🗑️ Синхронизация удалённых', callback_data='admin_sync_deleted_menu'))
     builder.row(back_button('admin_panel'), home_button())
     return builder.as_markup()
 
@@ -126,6 +127,7 @@ def key_view_kb(key_id: int, user_telegram_id: int) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text='📅 Продлить', callback_data=f'admin_key_extend:{key_id}'))
     builder.row(InlineKeyboardButton(text='🔄 Сбросить трафик', callback_data=f'admin_key_reset_traffic:{key_id}'))
     builder.row(InlineKeyboardButton(text='📊 Изменить лимит трафика', callback_data=f'admin_key_change_traffic:{key_id}'))
+    builder.row(InlineKeyboardButton(text='🗑️ Удалить ключ', callback_data=f'admin_key_delete_ask:{key_id}'))
     builder.row(back_button(f'admin_user_view:{user_telegram_id}'), home_button())
     return builder.as_markup()
 
@@ -190,4 +192,33 @@ def key_action_cancel_kb(key_id: int, user_telegram_id: int) -> InlineKeyboardMa
     """Клавиатура отмены действия с ключом."""
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data=f'admin_key_view:{key_id}'))
+    return builder.as_markup()
+
+def key_delete_confirm_kb(key_id: int, user_telegram_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления ключа."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🗑️ Да, удалить', callback_data=f'admin_key_delete_confirm:{key_id}'))
+    builder.row(InlineKeyboardButton(text='❌ Оставить', callback_data=f'admin_key_view:{key_id}'))
+    return builder.as_markup()
+
+def sync_deleted_menu_kb() -> InlineKeyboardMarkup:
+    """Подменю синхронизации удалённых ключей."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🧹 Очистить панель', callback_data='admin_sync_deleted_panel_ask'))
+    builder.row(InlineKeyboardButton(text='🗑️ Очистить базу', callback_data='admin_sync_deleted_db_ask'))
+    builder.row(back_button('admin_users'), home_button())
+    return builder.as_markup()
+
+def sync_deleted_panel_confirm_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения очистки панели."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🧹 Да, очистить панель', callback_data='admin_sync_deleted_panel_confirm'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
+    return builder.as_markup()
+
+def sync_deleted_db_confirm_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения очистки базы."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🗑️ Да, очистить базу', callback_data='admin_sync_deleted_db_confirm'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
     return builder.as_markup()

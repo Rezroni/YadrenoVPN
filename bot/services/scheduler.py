@@ -578,14 +578,19 @@ async def monthly_traffic_reset(bot: Bot) -> None:
                     
                     # Проверяем expiryTime
                     expires_at = key.get('expires_at')
+                    panel_ms = panel['expiryTime']
                     if expires_at:
                         dt = datetime.fromisoformat(str(expires_at))
                         expected_ms = int(dt.timestamp() * 1000)
-                        panel_ms = panel['expiryTime']
+                        
                         # Расхождение > 1 день
                         if panel_ms > 0 and abs(expected_ms - panel_ms) > 86400 * 1000:
                             needs_fix = True
                         elif panel_ms == 0 and expected_ms > 0:
+                            needs_fix = True
+                    else:
+                        expected_ms = 0
+                        if panel_ms > 0:
                             needs_fix = True
                     
                     # Проверяем totalGB

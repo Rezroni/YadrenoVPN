@@ -84,6 +84,21 @@ async def main():
     dp.include_router(admin_router)           # Админ-панель (общая)
     dp.include_router(user_router)            # Пользователь (имеет строгий внутренний порядок)
     
+    # Глобальный обработчик ошибок сети
+    from aiogram.exceptions import TelegramNetworkError
+    from aiogram.types import ErrorEvent
+    
+    @dp.errors()
+    async def global_error_handler(event: ErrorEvent):
+        """Перехватывает сетевые ошибки Telegram API и пишет короткий warning."""
+        exception = event.exception
+        if isinstance(exception, TelegramNetworkError):
+            logger.warning(f"⚠️ Нет связи с Telegram API: {exception}")
+            return True  # Ошибка обработана, не пробрасываем дальше
+        # Остальные ошибки логируем как обычно
+        logger.error(f"Необработанная ошибка: {exception}", exc_info=True)
+        return True
+    
     # Регистрируем startup/shutdown
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)

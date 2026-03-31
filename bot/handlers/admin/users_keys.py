@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database.requests import get_users_stats, get_all_users_paginated, get_user_by_telegram_id, toggle_user_ban, get_user_vpn_keys, get_user_payments_stats, get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin, get_active_servers, get_all_tariffs, get_user_balance, get_user_referral_coefficient, add_to_balance, deduct_from_balance, set_user_referral_coefficient
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user_ban_confirm_kb, key_view_kb, add_key_server_kb, add_key_inbound_kb, add_key_step_kb, add_key_confirm_kb, users_input_cancel_kb, key_action_cancel_kb, back_and_home_kb, home_only_kb
 from bot.services.vpn_api import get_client_from_server_data, VPNAPIError, format_traffic
@@ -91,7 +91,7 @@ async def show_key_view(callback: CallbackQuery, state: FSMContext):
     else:
         text += '\n💳 *История платежей:* _пусто_\n'
     user_telegram_id = key.get('telegram_id')
-    await callback.message.edit_text(text, reply_markup=key_view_kb(key_id, user_telegram_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=key_view_kb(key_id, user_telegram_id), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('admin_key_extend:'))
@@ -103,7 +103,7 @@ async def start_key_extend(callback: CallbackQuery, state: FSMContext):
     key_id = int(callback.data.split(':')[1])
     await state.set_state(AdminStates.key_extend_days)
     await state.update_data(current_key_id=key_id)
-    await callback.message.edit_text('📅 *Продление ключа*\n\nВведите количество дней для продления:', reply_markup=key_action_cancel_kb(key_id, 0), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '📅 *Продление ключа*\n\nВведите количество дней для продления:', reply_markup=key_action_cancel_kb(key_id, 0), parse_mode='Markdown')
     await callback.answer()
 
 @router.message(AdminStates.key_extend_days, F.text, ~F.text.startswith('/'))
@@ -180,7 +180,7 @@ async def start_change_traffic_limit(callback: CallbackQuery, state: FSMContext)
     await state.update_data(current_key_id=key_id)
     user_telegram_id = key.get('telegram_id')
     await state.update_data(current_user_telegram_id=user_telegram_id)
-    await callback.message.edit_text('📊 *Изменение лимита трафика*\n\nВведите новый лимит в ГБ (0 = без лимита):', reply_markup=key_action_cancel_kb(key_id, user_telegram_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '📊 *Изменение лимита трафика*\n\nВведите новый лимит в ГБ (0 = без лимита):', reply_markup=key_action_cancel_kb(key_id, user_telegram_id), parse_mode='Markdown')
     await callback.answer()
 
 @router.message(AdminStates.key_change_traffic, F.text, ~F.text.startswith('/'))
@@ -234,7 +234,7 @@ async def start_add_key(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(AdminStates.add_key_server)
     await state.update_data(add_key_user_id=user['id'], add_key_user_telegram_id=telegram_id)
-    await callback.message.edit_text(f'➕ *Добавление ключа для {format_user_display(user)}*\n\nВыберите сервер:', reply_markup=add_key_server_kb(servers), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'➕ *Добавление ключа для {format_user_display(user)}*\n\nВыберите сервер:', reply_markup=add_key_server_kb(servers), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('admin_add_key_server:'))
@@ -257,7 +257,7 @@ async def select_add_key_server(callback: CallbackQuery, state: FSMContext):
             await callback.answer('❌ На сервере нет inbound', show_alert=True)
             return
         await state.set_state(AdminStates.add_key_inbound)
-        await callback.message.edit_text(f"🖥️ *Сервер:* `{server['name']}`\n\nВыберите протокол (inbound):", reply_markup=add_key_inbound_kb(inbounds), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f"🖥️ *Сервер:* `{server['name']}`\n\nВыберите протокол (inbound):", reply_markup=add_key_inbound_kb(inbounds), parse_mode='Markdown')
     except VPNAPIError as e:
         await callback.answer(f'❌ Ошибка: {e}', show_alert=True)
     await callback.answer()
@@ -271,7 +271,7 @@ async def select_add_key_inbound(callback: CallbackQuery, state: FSMContext):
     inbound_id = int(callback.data.split(':')[1])
     await state.update_data(add_key_inbound_id=inbound_id)
     await state.set_state(AdminStates.add_key_traffic)
-    await callback.message.edit_text('📊 *Лимит трафика*\n\nВведите лимит в ГБ (0 = без лимита):', reply_markup=add_key_step_kb(2), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '📊 *Лимит трафика*\n\nВведите лимит в ГБ (0 = без лимита):', reply_markup=add_key_step_kb(2), parse_mode='Markdown')
     await callback.answer()
 
 @router.message(AdminStates.add_key_traffic, F.text, ~F.text.startswith('/'))
@@ -371,7 +371,7 @@ async def add_key_back(callback: CallbackQuery, state: FSMContext):
         servers = get_active_servers()
         await state.set_state(AdminStates.add_key_server)
         user = get_user_by_telegram_id(data.get('add_key_user_telegram_id'))
-        await callback.message.edit_text(f"➕ *Добавление ключа для {(format_user_display(user) if user else '?')}*\n\nВыберите сервер:", reply_markup=add_key_server_kb(servers), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f"➕ *Добавление ключа для {(format_user_display(user) if user else '?')}*\n\nВыберите сервер:", reply_markup=add_key_server_kb(servers), parse_mode='Markdown')
     else:
         await cancel_add_key(callback, state)
 
@@ -383,7 +383,7 @@ async def sync_db_to_panel(callback: CallbackQuery, state: FSMContext):
         return
     
     await callback.answer('📤 Запуск выгрузки...')
-    await callback.message.edit_text('⏳ *Выгрузка данных в панель (БД → Панель)...*\n\nЭто может занять некоторое время.', parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '⏳ *Выгрузка данных в панель (БД → Панель)...*\n\nЭто может занять некоторое время.', parse_mode='Markdown')
     
     import json
     from database.requests import get_all_active_keys_with_server, get_all_servers
@@ -392,7 +392,7 @@ async def sync_db_to_panel(callback: CallbackQuery, state: FSMContext):
     
     keys = get_all_active_keys_with_server()
     if not keys:
-        await callback.message.edit_text('✅ Нет активных ключей для синхронизации.', parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '✅ Нет активных ключей для синхронизации.', parse_mode='Markdown')
         return
     
     # Группируем по серверам
@@ -437,14 +437,26 @@ async def sync_db_to_panel(callback: CallbackQuery, state: FSMContext):
                 
                 # Проверяем expiryTime
                 expires_at = key.get('expires_at')
+                expected_ms = 0
                 if expires_at:
-                    dt = datetime.fromisoformat(str(expires_at))
-                    expected_ms = int(dt.timestamp() * 1000)
-                    panel_ms = panel['expiryTime']
-                    if panel_ms > 0 and abs(expected_ms - panel_ms) > 86400 * 1000:
-                        needs_fix = True
-                    elif panel_ms == 0 and expected_ms > 0:
-                        needs_fix = True
+                    from datetime import timezone
+                    dt_str = str(expires_at).replace('Z', '+00:00')
+                    dt = datetime.fromisoformat(dt_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    now_utc = datetime.now(timezone.utc)
+                    if dt > now_utc + timedelta(days=90000):
+                        expected_ms = 0
+                    else:
+                        expected_ms = int(dt.timestamp() * 1000)
+
+                panel_ms = panel['expiryTime']
+                if expected_ms == 0 and panel_ms != 0:
+                    needs_fix = True
+                elif expected_ms > 0 and panel_ms == 0:
+                    needs_fix = True
+                elif expected_ms > 0 and panel_ms > 0 and abs(expected_ms - panel_ms) > 86400 * 1000:
+                    needs_fix = True
                 
                 # Проверяем totalGB
                 traffic_limit = key.get('traffic_limit', 0) or 0
@@ -476,7 +488,7 @@ async def sync_db_to_panel(callback: CallbackQuery, state: FSMContext):
         result += f"❌ Ошибок: *{errors}*\n"
     result += f"\n📊 Всего ключей: *{len(keys)}*"
     
-    await callback.message.edit_text(result, reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, result, reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
 
     await callback.answer()
 
@@ -489,7 +501,7 @@ async def sync_panel_to_db(callback: CallbackQuery, state: FSMContext):
         return
     
     await callback.answer('📥 Запуск загрузки...')
-    await callback.message.edit_text('⏳ *Загрузка данных из панели (Панель → БД)...*\n\nЭто может занять некоторое время.', parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '⏳ *Загрузка данных из панели (Панель → БД)...*\n\nЭто может занять некоторое время.', parse_mode='Markdown')
     
     import json
     from database.requests import get_all_active_keys_with_server, get_all_servers
@@ -498,7 +510,7 @@ async def sync_panel_to_db(callback: CallbackQuery, state: FSMContext):
     
     keys = get_all_active_keys_with_server()
     if not keys:
-        await callback.message.edit_text('✅ Нет активных ключей для загрузки.', reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '✅ Нет активных ключей для загрузки.', reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
         return
     
     # Группируем по серверам
@@ -555,33 +567,45 @@ async def sync_panel_to_db(callback: CallbackQuery, state: FSMContext):
                 changed = False
                 
                 try:
+                    from datetime import timezone, timedelta
                     # Обновляем expires_at из панели
                     panel_ms = panel['expiryTime']
-                    max_expires = datetime.now() + timedelta(days=99999)
+                    max_expires = datetime.now(timezone.utc) + timedelta(days=99999)
                     
                     if panel_ms == 0:
                         # Бесконечный ключ на панели → ставим максимум
                         panel_dt = max_expires
                     else:
-                        panel_dt = datetime.fromtimestamp(panel_ms / 1000)
+                        panel_dt = datetime.fromtimestamp(panel_ms / 1000, tz=timezone.utc)
                         # Ограничиваем слишком далёкие даты
                         if panel_dt > max_expires:
                             panel_dt = max_expires
                     
-                    panel_expires_str = panel_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    # Для БД SQLite используем наивную строку (которая подразумевается в UTC)
+                    panel_expires_str = panel_dt.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S')
                     
                     db_expires = key.get('expires_at')
+                    need_update = False
                     if db_expires:
-                        db_dt = datetime.fromisoformat(str(db_expires))
+                        db_dt_str = str(db_expires).replace('Z', '+00:00')
+                        db_dt = datetime.fromisoformat(db_dt_str)
+                        if db_dt.tzinfo is None:
+                            db_dt = db_dt.replace(tzinfo=timezone.utc)
+                            
                         # Обновляем если разница больше суток
                         if abs((panel_dt - db_dt).total_seconds()) > 86400:
-                            from database.connection import get_db
-                            with get_db() as conn:
-                                conn.execute(
-                                    "UPDATE vpn_keys SET expires_at = ? WHERE id = ?",
-                                    (panel_expires_str, key['id'])
-                                )
-                            changed = True
+                            need_update = True
+                    else:
+                        need_update = True
+                        
+                    if need_update:
+                        from database.connection import get_db
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE vpn_keys SET expires_at = ? WHERE id = ?",
+                                (panel_expires_str, key['id'])
+                            )
+                        changed = True
                     
                     # Обновляем traffic_limit из панели
                     panel_total_bytes = panel['totalGB']
@@ -619,5 +643,5 @@ async def sync_panel_to_db(callback: CallbackQuery, state: FSMContext):
         result += f"❌ Ошибок: *{errors}*\n"
     result += f"\n📊 Всего ключей: *{len(keys)}*"
     
-    await callback.message.edit_text(result, reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, result, reply_markup=back_and_home_kb('admin_users'), parse_mode='Markdown')
     await callback.answer()

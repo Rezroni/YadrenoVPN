@@ -15,6 +15,7 @@ from bot.services.vpn_api import get_client_from_server_data, format_traffic
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import admin_main_menu_kb, home_only_kb
 from bot.utils.admin import is_admin
+from bot.utils.text import safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
     text = await get_admin_stats_text()
     
     try:
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             text,
             reply_markup=admin_main_menu_kb(),
             parse_mode="Markdown"

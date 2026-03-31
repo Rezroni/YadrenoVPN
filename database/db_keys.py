@@ -26,6 +26,7 @@ __all__ = [
     'update_key_traffic_limit',
     'update_vpn_key_config',
     'delete_vpn_key',
+    'get_all_keys_with_server',
     'get_user_keys_for_display',
     'get_key_details_for_user',
     'update_key_custom_name',
@@ -249,11 +250,15 @@ def is_key_active(key: dict) -> bool:
     expires_at = key.get('expires_at')
     if expires_at:
         try:
+            from datetime import timezone
             expires = datetime.fromisoformat(str(expires_at).replace('Z', '+00:00'))
-            now = datetime.now(expires.tzinfo if expires.tzinfo else None)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
             if expires < now:
                 return False
         except (ValueError, TypeError):
+
             pass
     
     # Проверка трафика
@@ -288,14 +293,37 @@ def get_all_active_keys_with_server() -> List[Dict[str, Any]]:
             SELECT 
                 vk.id, vk.panel_email, vk.traffic_used, vk.traffic_limit,
                 vk.traffic_notified_pct, vk.custom_name, vk.client_uuid,
-                vk.panel_inbound_id, vk.tariff_id,
+                vk.panel_inbound_id, vk.tariff_id, vk.expires_at,
                 s.id as server_id, s.name as server_name,
                 u.telegram_id
             FROM vpn_keys vk
             JOIN servers s ON vk.server_id = s.id
             JOIN users u ON vk.user_id = u.id
-            WHERE vk.expires_at > datetime('now')
+            WHERE (vk.expires_at > datetime('now') OR vk.expires_at IS NULL)
             AND vk.panel_email IS NOT NULL
+            AND s.is_active = 1
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_all_keys_with_server() -> List[Dict[str, Any]]:
+    """
+    Получает ВСЕ ключи с привязкой к серверу (включая истёкшие).
+    Для синхронизации удалённых ключей.
+    
+    Returns:
+        Список ключей с данными сервера и пользователя
+    """
+    with get_db() as conn:
+        cursor = conn.execute("""
+            SELECT 
+                vk.id, vk.panel_email, vk.client_uuid,
+                vk.panel_inbound_id, vk.server_id,
+                s.name as server_name,
+                u.telegram_id
+            FROM vpn_keys vk
+            JOIN servers s ON vk.server_id = s.id
+            JOIN users u ON vk.user_id = u.id
+            WHERE vk.panel_email IS NOT NULL
             AND s.is_active = 1
         """)
         return [dict(row) for row in cursor.fetchall()]

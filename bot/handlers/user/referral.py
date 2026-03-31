@@ -19,6 +19,7 @@ from database.requests import (
     get_active_referral_levels,
 )
 from bot.keyboards.user import referral_menu_kb
+from bot.utils.text import safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ async def show_referral_system(callback: CallbackQuery):
     
     text = "\n".join(text_lines)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_menu_kb(),
         parse_mode="Markdown"

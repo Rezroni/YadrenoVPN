@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ async def renew_stars_select_tariff(callback: CallbackQuery):
     if not tariffs:
         await callback.answer('Нет доступных тарифов', show_alert=True)
         return
-    await callback.message.edit_text(f"⭐ *Оплата звёздами*\n\n🔑 Ключ: *{escape_md(key['display_name'])}*\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"⭐ *Оплата звёздами*\n\n🔑 Ключ: *{escape_md(key['display_name'])}*\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('renew_pay_stars:'))
@@ -70,10 +70,10 @@ async def pay_stars_select_tariff(callback: CallbackQuery):
         order_id = callback.data.split(':')[1]
     tariffs = get_all_tariffs(include_hidden=False)
     if not tariffs:
-        await callback.message.edit_text('⭐ *Оплата звёздами*\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '⭐ *Оплата звёздами*\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
         await callback.answer()
         return
-    await callback.message.edit_text('⭐ *Оплата звёздами*\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '⭐ *Оплата звёздами*\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('stars_pay:'))

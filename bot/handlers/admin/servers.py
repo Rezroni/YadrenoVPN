@@ -168,7 +168,7 @@ async def render_server_view(message: Message, server_id: int, state: FSMContext
         groups_str = ", ".join(group_names) if group_names else "Основная"
         lines.append(f"\n📂 Группы: `{groups_str}`")
 
-    await message.edit_text(
+    await safe_edit_or_send(message, 
         "\n".join(lines),
         reply_markup=server_view_kb(server_id, server['is_active'], groups_count > 1),
         parse_mode="Markdown"
@@ -192,7 +192,7 @@ async def show_servers_list(callback: CallbackQuery, state: FSMContext):
     text = await get_servers_list_text()
     servers = get_all_servers()
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=servers_list_kb(servers),
         parse_mode="Markdown"
@@ -213,7 +213,7 @@ async def refresh_servers_list(callback: CallbackQuery, state: FSMContext):
     servers = get_all_servers()
     
     try:
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             text,
             reply_markup=servers_list_kb(servers),
             parse_mode="Markdown"
@@ -301,7 +301,7 @@ async def start_add_server(callback: CallbackQuery, state: FSMContext):
         await state.set_state(AdminStates.server_select_group)
         await state.update_data(server_data={})
         
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             "📝 *Добавление сервера*\n\n"
             "Выберите группу для нового сервера:",
             reply_markup=group_select_kb(groups, "server_group_select", "admin_servers"),
@@ -316,7 +316,7 @@ async def start_add_server(callback: CallbackQuery, state: FSMContext):
     
     text = get_add_step_text(1, {})
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_server_step_kb(1),
         parse_mode="Markdown"
@@ -337,7 +337,7 @@ async def server_group_selected(callback: CallbackQuery, state: FSMContext):
     
     text = f"📂 Группа: *{group_name}*\n\n" + get_add_step_text(1, {})
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_server_step_kb(1),
         parse_mode="Markdown"
@@ -367,7 +367,7 @@ async def add_server_back(callback: CallbackQuery, state: FSMContext):
     
     text = get_add_step_text(new_step, data.get('server_data', {}))
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_server_step_kb(new_step),
         parse_mode="Markdown"
@@ -381,7 +381,7 @@ async def process_add_step(message: Message, state: FSMContext):
     current_step = data.get('add_step', 1)
     server_data = data.get('server_data', {})
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     param = get_param_by_index(current_step - 1)
     value = get_message_text_for_storage(message, 'plain')
@@ -527,7 +527,7 @@ async def add_server_retest(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     server_data = data.get('server_data', {})
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         "⏳ *Проверка подключения...*",
         parse_mode="Markdown"
     )
@@ -554,7 +554,7 @@ async def add_server_retest(callback: CallbackQuery, state: FSMContext):
         )
         kb = add_server_test_failed_kb()
     
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await safe_edit_or_send(callback.message, text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 
@@ -580,7 +580,7 @@ async def add_server_save(callback: CallbackQuery, state: FSMContext):
             group_id=data.get('selected_group_id', 1)
         )
         
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             f"✅ *Сервер успешно добавлен!*\n\n"
             f"🖥️ {server_data['name']}\n"
             f"🔗 {server_data.get('protocol', 'https')}://{server_data['host']}:{server_data['port']}{server_data['web_base_path']}",
@@ -596,7 +596,7 @@ async def add_server_save(callback: CallbackQuery, state: FSMContext):
         
     except Exception as e:
         logger.error(f"Ошибка добавления сервера: {e}")
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             f"❌ *Ошибка сохранения*\n\n`{e}`",
             reply_markup=back_and_home_kb("admin_servers"),
             parse_mode="Markdown"
@@ -655,7 +655,7 @@ async def start_edit_server(callback: CallbackQuery, state: FSMContext):
     
     text = get_edit_text(server, 0)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_server_kb(0, get_total_params()),
         parse_mode="Markdown"
@@ -684,7 +684,7 @@ async def edit_server_prev(callback: CallbackQuery, state: FSMContext):
     
     text = get_edit_text(server, new_param)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_server_kb(new_param, get_total_params()),
         parse_mode="Markdown"
@@ -713,7 +713,7 @@ async def edit_server_next(callback: CallbackQuery, state: FSMContext):
     
     text = get_edit_text(server, new_param)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_server_kb(new_param, get_total_params()),
         parse_mode="Markdown"
@@ -728,7 +728,7 @@ async def edit_server_value(message: Message, state: FSMContext):
     server_id = data.get('server_id')
     current_param = data.get('edit_param', 0)
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     param = get_param_by_index(current_param)
     value = get_message_text_for_storage(message, 'plain')
@@ -874,7 +874,7 @@ async def confirm_delete_server(callback: CallbackQuery, state: FSMContext):
     
     await state.set_state(AdminStates.delete_server_confirm)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"🗑️ *Удаление сервера*\n\n"
         f"Вы уверены, что хотите удалить сервер?\n\n"
         f"🖥️ *{server['name']}*\n"
@@ -909,7 +909,7 @@ async def execute_delete_server(callback: CallbackQuery, state: FSMContext):
         # Сбрасываем кэш
         invalidate_client_cache(server_id)
         
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             f"✅ *Сервер удалён*\n\n"
             f"🖥️ {server_name}",
             parse_mode="Markdown"
@@ -946,7 +946,7 @@ async def server_change_group_start(callback: CallbackQuery, state: FSMContext):
     group_names = [g['name'] for g in groups if g['id'] in selected]
     groups_str = ", ".join(group_names) if group_names else "Основная"
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"📂 *Группы сервера «{server['name']}»*\n\n"
         f"Текущие группы: *{groups_str}*\n\n"
         "Нажмите на группу чтобы добавить или убрать:",
@@ -984,7 +984,7 @@ async def server_toggle_group(callback: CallbackQuery, state: FSMContext):
     group_names = [g['name'] for g in groups if g['id'] in selected]
     groups_str = ", ".join(group_names) if group_names else "Основная"
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"📂 *Группы сервера «{server['name']}»*\n\n"
         f"Текущие группы: *{groups_str}*\n\n"
         "Нажмите на группу чтобы добавить или убрать:",

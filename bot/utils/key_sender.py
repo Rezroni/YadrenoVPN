@@ -124,11 +124,15 @@ async def send_key_with_qr(
 
 async def _send_error(messageable, text, markup):
     """Отправляет сообщение об ошибке."""
+    from bot.utils.text import safe_edit_or_send
     msg_text = f"❌ {text}"
-    if hasattr(messageable, 'edit_text'):
-        await messageable.edit_text(msg_text, reply_markup=markup)
-    elif hasattr(messageable, 'message') and hasattr(messageable.message, 'edit_text'):
-         await messageable.message.edit_text(msg_text, reply_markup=markup)
+    # Определяем Message для safe_edit_or_send
+    if hasattr(messageable, 'text') or hasattr(messageable, 'photo'):
+        # Это Message
+        await safe_edit_or_send(messageable, msg_text, reply_markup=markup)
+    elif hasattr(messageable, 'message'):
+        # Это CallbackQuery
+        await safe_edit_or_send(messageable.message, msg_text, reply_markup=markup)
     else:
         func = messageable.answer if hasattr(messageable, 'answer') else messageable.message.answer
         await func(msg_text, reply_markup=markup)
@@ -136,10 +140,14 @@ async def _send_error(messageable, text, markup):
 
 async def _send_text(messageable, text, markup):
     """Отправляет текстовое сообщение (fallback при отсутствии фото)."""
-    if hasattr(messageable, 'edit_text'):
-        await messageable.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    elif hasattr(messageable, 'message') and hasattr(messageable.message, 'edit_text'):
-         await messageable.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    from bot.utils.text import safe_edit_or_send
+    if hasattr(messageable, 'text') or hasattr(messageable, 'photo'):
+        # Это Message
+        await safe_edit_or_send(messageable, text, reply_markup=markup, parse_mode="Markdown")
+    elif hasattr(messageable, 'message'):
+        # Это CallbackQuery
+        await safe_edit_or_send(messageable.message, text, reply_markup=markup, parse_mode="Markdown")
     else:
         func = messageable.answer if hasattr(messageable, 'answer') else messageable.message.answer
         await func(text, reply_markup=markup, parse_mode="Markdown")
+

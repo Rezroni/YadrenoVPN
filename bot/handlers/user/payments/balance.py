@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from config import ADMIN_IDS
 from bot.handlers.user.payments.base import _format_price_compact, _is_cards_via_yookassa_direct
 
@@ -55,7 +55,7 @@ async def _show_balance_payment_screen(callback: CallbackQuery, state: FSMContex
             available_methods.append('card')
     if remaining_cents > 0 and (not available_methods):
         text += '\n\n💡 *Для доплаты этой суммы нет подходящего способа оплаты.*\nПоднакопите ещё немного на реферальном балансе\nили оплатите тариф без использования баланса.'
-    await callback.message.edit_text(text, reply_markup=balance_payment_kb(tariff_id=tariff_id, key_id=key_id, balance_cents=balance_cents, tariff_price_cents=tariff_price_cents, balance_to_deduct=balance_to_deduct, remaining_cents=remaining_cents, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr_enabled, cards_via_yookassa_direct=cards_via_yookassa_direct), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=balance_payment_kb(tariff_id=tariff_id, key_id=key_id, balance_cents=balance_cents, tariff_price_cents=tariff_price_cents, balance_to_deduct=balance_to_deduct, remaining_cents=remaining_cents, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr_enabled, cards_via_yookassa_direct=cards_via_yookassa_direct), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data == 'pay_use_balance')
@@ -76,10 +76,10 @@ async def pay_use_balance_buy_handler(callback: CallbackQuery, state: FSMContext
     tariffs = get_all_tariffs(include_hidden=False)
     rub_tariffs = [t for t in tariffs if t.get('price_rub') and t['price_rub'] > 0]
     if not rub_tariffs:
-        await callback.message.edit_text('💰 *Оплата с баланса*\n\n😔 Нет доступных тарифов с ценой в рублях.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '💰 *Оплата с баланса*\n\n😔 Нет доступных тарифов с ценой в рублях.', reply_markup=home_only_kb(), parse_mode='Markdown')
         await callback.answer()
         return
-    await callback.message.edit_text(f'💰 *Оплата с баланса*\n\nВаш баланс: *{_format_price_compact(balance_cents)}*\n\nВыберите тариф:', reply_markup=tariff_select_kb(rub_tariffs, back_callback='buy_key', is_balance=True), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'💰 *Оплата с баланса*\n\nВаш баланс: *{_format_price_compact(balance_cents)}*\n\nВыберите тариф:', reply_markup=tariff_select_kb(rub_tariffs, back_callback='buy_key', is_balance=True), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('pay_use_balance:'))
@@ -109,10 +109,10 @@ async def pay_use_balance_renew_handler(callback: CallbackQuery, state: FSMConte
     tariffs = get_tariffs_for_renewal(key.get('tariff_id', 0))
     rub_tariffs = [t for t in tariffs if t.get('price_rub') and t['price_rub'] > 0]
     if not rub_tariffs:
-        await callback.message.edit_text('💰 *Оплата с баланса*\n\n😔 Нет доступных тарифов с ценой в рублях.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '💰 *Оплата с баланса*\n\n😔 Нет доступных тарифов с ценой в рублях.', reply_markup=home_only_kb(), parse_mode='Markdown')
         await callback.answer()
         return
-    await callback.message.edit_text(f"💰 *Оплата с баланса*\n\n🔑 Ключ: *{key['display_name']}*\nВаш баланс: *{_format_price_compact(balance_cents)}*\n\nВыберите тариф:", reply_markup=renew_tariff_select_kb(rub_tariffs, key_id, is_balance=True), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"💰 *Оплата с баланса*\n\n🔑 Ключ: *{key['display_name']}*\nВаш баланс: *{_format_price_compact(balance_cents)}*\n\nВыберите тариф:", reply_markup=renew_tariff_select_kb(rub_tariffs, key_id, is_balance=True), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('balance_pay:'))
@@ -196,7 +196,7 @@ async def pay_with_balance_handler(callback: CallbackQuery, state: FSMContext):
     
     if key_id:
         # Продление — ключ уже на сервере, просто сообщаем
-        await callback.message.edit_text(f'✅ *Оплата успешно завершена!*\n\nС вашего баланса списано {price_str}\nКлюч продлён на {days} дн.', parse_mode='Markdown', reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text='🈴 На главную', callback_data='start')).as_markup())
+        await safe_edit_or_send(callback.message, f'✅ *Оплата успешно завершена!*\n\nС вашего баланса списано {price_str}\nКлюч продлён на {days} дн.', parse_mode='Markdown', reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text='🈴 На главную', callback_data='start')).as_markup())
     else:
         # Новый ключ — нужно настроить (выбор сервера/inbound)
         from bot.handlers.user.payments.base import finalize_payment_ui
@@ -312,7 +312,7 @@ async def pay_qr_balance_handler(callback: CallbackQuery, state: FSMContext):
     remaining_rub = remaining_cents / 100
     await state.update_data(balance_to_deduct=balance_to_deduct, tariff_price_cents=tariff_price_cents, tariff_id=tariff_id, key_id=key_id, remaining_cents=remaining_cents)
     (_, order_id) = create_pending_order(user_id=user_id, tariff_id=tariff_id, payment_type='yookassa_qr', vpn_key_id=key_id)
-    await callback.message.edit_text('⏳ Создаём QR-код для оплаты...')
+    await safe_edit_or_send(callback.message, '⏳ Создаём QR-код для оплаты...')
     try:
         bot_info = await callback.bot.get_me()
         bot_name = bot_info.username
@@ -322,7 +322,7 @@ async def pay_qr_balance_handler(callback: CallbackQuery, state: FSMContext):
         qr_image_data = result.get('qr_image_data')
         qr_url = result.get('qr_url', '')
         if not qr_image_data or not qr_url:
-            await callback.message.edit_text('❌ ЮКасса не вернула данные для оплаты. Попробуйте позже.', reply_markup=home_only_kb(), parse_mode='Markdown')
+            await safe_edit_or_send(callback.message, '❌ ЮКасса не вернула данные для оплаты. Попробуйте позже.', reply_markup=home_only_kb(), parse_mode='Markdown')
             return
         text = f"📱 *QR-код для оплаты*\n\n💳 *Тариф:* {tariff['name']}\n💰 *Сумма:* {remaining_rub:.2f} ₽\n⏳ *Срок:* {tariff['duration_days']} дней\n\nОтсканируйте QR-код банковским приложением (СБП) или перейдите по [ссылке на оплату]({qr_url}).\n\n_После оплаты нажмите «✅ Я оплатил»._"
         photo = BufferedInputFile(qr_image_data, filename='qr.png')
@@ -331,5 +331,5 @@ async def pay_qr_balance_handler(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer_photo(photo=photo, caption=text, reply_markup=yookassa_qr_kb(order_id, back_callback=back_cb, qr_url=qr_url), parse_mode='Markdown')
     except (ValueError, RuntimeError) as e:
         logger.error(f'Ошибка создания QR ЮКасса: {e}')
-        await callback.message.edit_text(f'❌ *Ошибка создания QR*\n\n_{e}_\n\nПопробуйте другой способ оплаты.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f'❌ *Ошибка создания QR*\n\n_{e}_\n\nПопробуйте другой способ оплаты.', reply_markup=home_only_kb(), parse_mode='Markdown')
     await callback.answer()

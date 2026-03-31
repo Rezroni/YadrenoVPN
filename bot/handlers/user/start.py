@@ -11,7 +11,7 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -120,14 +120,7 @@ async def callback_start(callback: CallbackQuery, state: FSMContext):
     from database.requests import is_trial_enabled, get_trial_tariff_id, has_used_trial
     show_trial = is_trial_enabled() and get_trial_tariff_id() is not None and (not has_used_trial(user_id))
     show_referral = is_referral_enabled()
-    try:
-        await callback.message.edit_text(text, reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral), parse_mode='MarkdownV2')
-    except Exception:
-        try:
-            await callback.message.delete()
-        except:
-            pass
-        await callback.message.answer(text, reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral), parse_mode='MarkdownV2')
+    await safe_edit_or_send(callback.message, text, reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral), parse_mode='MarkdownV2')
     await callback.answer()
 
 @router.message(Command('help'))
@@ -137,14 +130,14 @@ async def cmd_help(message: Message, state: FSMContext):
         await message.answer('⛔ *Доступ заблокирован*\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', parse_mode='Markdown')
         return
     await state.clear()
-    await show_help(message.answer)
+    await show_help(message, is_callback=False)
 
-async def show_help(send_function):
-    """
-    Общая логика для показа справки.
+async def show_help(message: 'Message', is_callback: bool = False):
+    """Общая логика для показа справки.
     
     Args:
-        send_function: Функция для отправки сообщения (message.answer или callback.message.edit_text)
+        message: Сообщение (Message) для отправки/редактирования
+        is_callback: True если вызвано из callback (редактируем), False если из команды (отправляем новое)
     """
     from bot.keyboards.admin import home_only_kb
     from bot.keyboards.user import help_kb
@@ -162,32 +155,16 @@ async def show_help(send_function):
     support_hidden = get_setting('support_hidden', '0') == '1'
     news_name = get_setting('news_button_name', 'Новости')
     support_name = get_setting('support_button_name', 'Поддержка')
-    await send_function(help_text, reply_markup=help_kb(news_link, support_link, news_hidden=news_hidden, support_hidden=support_hidden, news_name=news_name, support_name=support_name), parse_mode='MarkdownV2')
+    kb = help_kb(news_link, support_link, news_hidden=news_hidden, support_hidden=support_hidden, news_name=news_name, support_name=support_name)
+    if is_callback:
+        await safe_edit_or_send(message, help_text, reply_markup=kb, parse_mode='MarkdownV2')
+    else:
+        await message.answer(help_text, reply_markup=kb, parse_mode='MarkdownV2')
 
 @router.callback_query(F.data == 'help')
 async def help_handler(callback: CallbackQuery):
     """Показывает справку по кнопке."""
-    try:
-        await show_help(callback.message.edit_text)
-    except Exception:
-        try:
-            await callback.message.delete()
-        except:
-            pass
-        await show_help(callback.message.answer)
-    await callback.answer()
-
-@router.callback_query(F.data == 'help')
-async def help_stub(callback: CallbackQuery):
-    """Раздел справки."""
-    try:
-        await show_help(callback.message.edit_text)
-    except Exception:
-        try:
-            await callback.message.delete()
-        except:
-            pass
-        await show_help(callback.message.answer)
+    await show_help(callback.message, is_callback=True)
     await callback.answer()
 
 @router.callback_query(F.data == 'noop')

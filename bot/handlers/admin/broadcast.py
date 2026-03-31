@@ -100,7 +100,7 @@ async def show_broadcast_menu(callback: CallbackQuery, state: FSMContext):
         "3️⃣ Нажмите «Начать рассылку»"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_main_kb(has_message, current_filter, in_progress, user_count),
         parse_mode="Markdown"
@@ -139,7 +139,7 @@ async def broadcast_edit_message(callback: CallbackQuery, state: FSMContext):
         "💡 Сообщение будет отправлено пользователям в точности как вы его прислали."
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_back_kb(),
         parse_mode="Markdown"
@@ -153,7 +153,7 @@ async def broadcast_save_message(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     text = None
     photo_file_id = None
@@ -268,7 +268,7 @@ async def broadcast_set_filter(callback: CallbackQuery):
         "3️⃣ Нажмите «Начать рассылку»"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_main_kb(has_message, filter_key, in_progress, user_count),
         parse_mode="Markdown"
@@ -314,7 +314,7 @@ async def broadcast_start(callback: CallbackQuery):
         "Начать рассылку?"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_confirm_kb(user_count),
         parse_mode="Markdown"
@@ -363,7 +363,7 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
     blocked = 0
     
     # Начинаем рассылку
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"📤 *Рассылка запущена*\n\n"
         f"Отправлено: 0/{total}\n"
         f"🚫 Заблокировали бота: 0",
@@ -403,7 +403,7 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
         # Обновляем прогресс каждые 10 сообщений
         if (i + 1) % 10 == 0 or (i + 1) == total:
             try:
-                await callback.message.edit_text(
+                await safe_edit_or_send(callback.message, 
                     f"📤 *Рассылка в процессе...*\n\n"
                     f"Отправлено: {sent}/{total}\n"
                     f"🚫 Заблокировали бота: {blocked}",
@@ -419,7 +419,7 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
     set_broadcast_in_progress(False)
     
     # Итоговый отчёт
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"✅ *Рассылка завершена!*\n\n"
         f"📤 Отправлено: {sent}\n"
         f"🚫 Заблокировали бота: {blocked}",
@@ -448,7 +448,7 @@ async def broadcast_notifications(callback: CallbackQuery, state: FSMContext):
         "📝 Текст уведомления настраивается отдельно"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_notifications_kb(days),
         parse_mode="Markdown"
@@ -473,7 +473,7 @@ async def broadcast_notify_days(callback: CallbackQuery, state: FSMContext):
         "Введите число от 1 до 30:"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=broadcast_notify_back_kb(),
         parse_mode="Markdown"
@@ -541,7 +541,7 @@ async def broadcast_notify_text(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(editing_message=callback.message)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         format_text_for_edit("Текст уведомления об истечении", current_text or "Не задано"),
         reply_markup=broadcast_notify_back_kb(),
         parse_mode="MarkdownV2"
@@ -555,7 +555,7 @@ async def broadcast_save_notify_text(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from bot.utils.text import get_message_text_for_storage, format_text_after_save
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send, format_text_after_save
     from bot.keyboards.admin import back_and_home_kb
     
     data = await state.get_data()
@@ -582,7 +582,7 @@ async def broadcast_save_notify_text(message: Message, state: FSMContext):
     # Редактируем сообщение с новым текстом
     if editing_message:
         try:
-            await editing_message.edit_text(
+            await safe_edit_or_send(editing_message, 
                 format_text_after_save("Текст уведомления об истечении", notify_text),
                 reply_markup=back_and_home_kb("broadcast_notifications"),
                 parse_mode="MarkdownV2"

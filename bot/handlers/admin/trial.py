@@ -14,7 +14,7 @@ from aiogram.filters import StateFilter
 
 from bot.states.admin_states import AdminStates
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ async def show_trial_menu(callback: CallbackQuery):
         "• Каждый пользователь может активировать пробный период только один раз."
     )
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=trial_settings_kb(enabled, tariff_name),
         parse_mode="Markdown"
@@ -120,7 +120,7 @@ async def admin_trial_edit_text_start(callback: CallbackQuery, state: FSMContext
     
     await state.update_data(editing_message=callback.message)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         format_text_for_edit("Текст страницы пробной подписки", current_text),
         reply_markup=trial_edit_text_cancel_kb(),
         parse_mode="MarkdownV2"
@@ -155,7 +155,7 @@ async def admin_trial_edit_text_save(message: Message, state: FSMContext):
     # Редактируем сообщение с новым текстом
     if editing_message:
         try:
-            await editing_message.edit_text(
+            await safe_edit_or_send(editing_message, 
                 format_text_after_save("Текст страницы пробной подписки", new_text),
                 reply_markup=back_and_home_kb("admin_trial"),
                 parse_mode="MarkdownV2"
@@ -200,7 +200,7 @@ async def admin_trial_select_tariff(callback: CallbackQuery):
         await callback.answer("❌ Нет доступных тарифов", show_alert=True)
         return
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         "📋 *Выбор тарифа для пробной подписки*\n\n"
         "Выберите тариф, который будет выдаваться пользователям.\n"
         "Отображаются все тарифы, включая неактивные для покупки.\n\n"

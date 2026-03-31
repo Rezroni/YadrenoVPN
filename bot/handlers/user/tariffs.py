@@ -11,7 +11,7 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -47,13 +47,13 @@ async def buy_key_handler(callback: CallbackQuery):
             if balance_cents > 0:
                 show_balance_button = True
     if not crypto_configured and (not stars_enabled) and (not cards_enabled) and (not yookassa_qr):
-        await callback.message.edit_text('💳 *Купить ключ*\n\n😔 К сожалению, сейчас оплата недоступна.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '💳 *Купить ключ*\n\n😔 К сожалению, сейчас оплата недоступна.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
         await callback.answer()
         return
     prepayment_text = get_setting('prepayment_text') or ''
     text = f'{prepayment_text}\n\nВыберите способ оплаты\\:'
     try:
-        await callback.message.edit_text(text, reply_markup=buy_key_kb(crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, order_id=existing_order_id, show_balance_button=show_balance_button), parse_mode='MarkdownV2')
+        await safe_edit_or_send(callback.message, text, reply_markup=buy_key_kb(crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, order_id=existing_order_id, show_balance_button=show_balance_button), parse_mode='MarkdownV2')
     except Exception:
         try:
             await callback.message.delete()

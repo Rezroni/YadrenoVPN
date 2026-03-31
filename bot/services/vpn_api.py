@@ -268,8 +268,23 @@ async def push_key_to_panel(key_id: int, reset_traffic: bool = False) -> bool:
     # Конвертируем expires_at из БД → expiryTime (ms)
     expires_at = key.get('expires_at')
     if expires_at:
-        dt = datetime.fromisoformat(str(expires_at))
-        expiry_time_ms = int(dt.timestamp() * 1000)
+        from datetime import datetime, timedelta, timezone
+        
+        # Если есть 'Z', убираем/заменяем, парсим
+        dt_str = str(expires_at).replace('Z', '+00:00')
+        dt = datetime.fromisoformat(dt_str)
+        
+        # Убеждаемся что tzinfo установлен (в БД время всегда UTC)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+            
+        now_utc = datetime.now(timezone.utc)
+        
+        # Если срок больше 90000 дней (бессрочный)
+        if dt > now_utc + timedelta(days=90000):
+            expiry_time_ms = 0
+        else:
+            expiry_time_ms = int(dt.timestamp() * 1000)
     else:
         expiry_time_ms = 0  # Бессрочный
     

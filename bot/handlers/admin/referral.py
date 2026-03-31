@@ -71,7 +71,7 @@ async def show_referral_menu(callback: CallbackQuery, state: FSMContext):
     
     text += "\nВыберите действие:"
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_main_kb(enabled, reward_type, levels),
         parse_mode="Markdown"
@@ -157,7 +157,7 @@ async def referral_level_view(callback: CallbackQuery, state: FSMContext):
         "Выберите действие:"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_level_kb(level_num, level['percent'], level['enabled']),
         parse_mode="Markdown"
@@ -226,7 +226,7 @@ async def referral_level_percent_start(callback: CallbackQuery, state: FSMContex
         "Введите новый процент (1-100):"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_back_kb(),
         parse_mode="Markdown"
@@ -247,7 +247,7 @@ async def referral_level_percent_input(message: Message, state: FSMContext):
     if not level_num:
         return
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     text = get_message_text_for_storage(message, 'plain')
     
@@ -302,7 +302,7 @@ async def referral_conditions_start(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(editing_message=callback.message)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         format_text_for_edit("Текст условий реферальной программы", current_text or "Не задано"),
         reply_markup=referral_back_kb(),
         parse_mode="MarkdownV2"
@@ -316,7 +316,7 @@ async def referral_conditions_input(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from bot.utils.text import get_message_text_for_storage, format_text_after_save
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send, format_text_after_save
     from bot.keyboards.admin import back_and_home_kb
     
     data = await state.get_data()
@@ -342,7 +342,7 @@ async def referral_conditions_input(message: Message, state: FSMContext):
     # Редактируем сообщение с новым текстом
     if editing_message:
         try:
-            await editing_message.edit_text(
+            await safe_edit_or_send(editing_message, 
                 format_text_after_save("Текст условий реферальной программы", saved_text),
                 reply_markup=back_and_home_kb("admin_referral"),
                 parse_mode="MarkdownV2"

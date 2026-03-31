@@ -39,7 +39,7 @@ from bot.keyboards.admin import (
     cards_management_kb,
     back_and_home_kb
 )
-from bot.utils.text import escape_markdown_url, escape_md
+from bot.utils.text import escape_markdown_url, escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ async def show_payments_menu(callback: CallbackQuery, state: FSMContext):
 
     monthly_reset = get_setting('monthly_traffic_reset_enabled', '0') == '1'
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=payments_menu_kb(stars, crypto, cards, qr, monthly_reset),
         parse_mode="Markdown",
@@ -241,7 +241,7 @@ async def start_crypto_setup(callback: CallbackQuery, state: FSMContext):
         "🔗 *Теперь скопируйте ссылку на позицию из бота и отправьте её мне:*"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=crypto_setup_kb(1),
         parse_mode="Markdown",
@@ -433,7 +433,7 @@ async def crypto_setup_save(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer("✅ Крипто-платежи включены!")
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         "✅ *Крипто-платежи настроены и включены!*\n\n"
         "Теперь пользователи смогут оплачивать криптовалютой.\n"
         "Не забудьте добавить тарифы с указанием ID тарифа (1-9)!",
@@ -488,7 +488,7 @@ async def show_crypto_management_menu(callback: CallbackQuery, state: FSMContext
             "Выберите действие:"
         )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=crypto_management_kb(is_enabled, mode),
         parse_mode="Markdown",
@@ -581,7 +581,7 @@ async def crypto_mgmt_edit_url(callback: CallbackQuery, state: FSMContext):
             "🔗 *Введите новую ссылку из @Ya_SellerBot:*"
         )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=back_and_home_kb("admin_crypto_management"),
         parse_mode="Markdown",
@@ -612,7 +612,7 @@ async def crypto_mgmt_edit_secret(callback: CallbackQuery, state: FSMContext):
         "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`."
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=back_and_home_kb("admin_crypto_management"),
         parse_mode="Markdown"
@@ -668,7 +668,7 @@ async def show_crypto_edit_screen(callback: CallbackQuery, state: FSMContext, pa
         f"({param['hint']})"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_crypto_kb(param_index, total),
         parse_mode="Markdown"
@@ -808,7 +808,7 @@ async def show_cards_management_menu(callback: CallbackQuery, state: FSMContext)
         "Выберите действие:"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=cards_management_kb(is_enabled),
         parse_mode="Markdown",
@@ -863,7 +863,7 @@ async def cards_mgmt_edit_token(callback: CallbackQuery, state: FSMContext):
         "Отправьте полученный токен ответом на это сообщение:"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=back_and_home_kb("admin_payments_cards"),
         parse_mode="Markdown"
@@ -981,7 +981,7 @@ async def show_qr_management_menu(callback: CallbackQuery, state: FSMContext):
         "Выберите действие:"
     )
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=qr_management_kb(is_enabled),
         parse_mode="Markdown",
@@ -1029,7 +1029,7 @@ async def qr_edit_shop_id(callback: CallbackQuery, state: FSMContext):
     current = get_setting('yookassa_shop_id', '')
     current_display = f"\nТекущий: `{current}`" if current else ""
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"🏪 *Введите Shop ID ЮКасса*{current_display}\n\n"
         "Найдите в разделе: *Настройки → API-интеграция* вашего магазина.\n"
         "(Это числовой ID, например: `123456`)",
@@ -1095,7 +1095,7 @@ async def qr_edit_secret(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.qr_setup_secret_key)
     await state.update_data(last_menu_msg_id=callback.message.message_id)
 
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         "🔐 *Введите Secret Key ЮКасса*\n\n"
         "Найдите в разделе: *Настройки → API-интеграция* вашего магазина.\n"
         "_(Секретный ключ будет скрыт после сохранения)_",

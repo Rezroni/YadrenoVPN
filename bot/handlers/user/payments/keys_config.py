@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ async def process_new_key_server_selection(callback: CallbackQuery, state: FSMCo
             await process_new_key_final(callback, state, server_id, inbounds[0]['id'])
             return
         await state.set_state(NewKeyConfig.waiting_for_inbound)
-        await callback.message.edit_text(f"🖥️ *Сервер:* {server['name']}\n\nВыберите протокол:", reply_markup=new_key_inbound_list_kb(inbounds), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f"🖥️ *Сервер:* {server['name']}\n\nВыберите протокол:", reply_markup=new_key_inbound_list_kb(inbounds), parse_mode='Markdown')
     except VPNAPIError as e:
         await callback.answer(f'❌ Ошибка подключения: {e}', show_alert=True)
     await callback.answer()
@@ -81,12 +81,12 @@ async def process_new_key_final(callback: CallbackQuery, state: FSMContext, serv
     order_id = data.get('new_key_order_id')
     key_id = data.get('new_key_id')
     if not order_id:
-        await callback.message.edit_text('❌ Ошибка: потерян номер заказа.')
+        await safe_edit_or_send(callback.message, '❌ Ошибка: потерян номер заказа.')
         await state.clear()
         return
     order = find_order_by_order_id(order_id)
     if not order:
-        await callback.message.edit_text('❌ Ошибка: заказ не найден.')
+        await safe_edit_or_send(callback.message, '❌ Ошибка: заказ не найден.')
         await state.clear()
         return
     if not key_id:
@@ -99,7 +99,7 @@ async def process_new_key_final(callback: CallbackQuery, state: FSMContext, serv
             traffic_limit_bytes = (_tariff.get('traffic_limit_gb', 0) or 0) * 1024 ** 3 if _tariff else 0
             key_id = create_initial_vpn_key(order['user_id'], order['tariff_id'], days, traffic_limit=traffic_limit_bytes)
             update_payment_key_id(order_id, key_id)
-    await callback.message.edit_text('⏳ Настраиваем ваш ключ...')
+    await safe_edit_or_send(callback.message, '⏳ Настраиваем ваш ключ...')
     try:
         user_id = order['user_id']
         telegram_id = callback.from_user.id
@@ -122,7 +122,7 @@ async def process_new_key_final(callback: CallbackQuery, state: FSMContext, serv
         await send_key_with_qr(callback, new_key, key_issued_kb(), is_new=True)
     except Exception as e:
         logger.error(f'Ошибка настройки ключа (id={key_id}): {e}')
-        await callback.message.edit_text(f'❌ Ошибка настройки ключа: {e}\nОбратитесь в поддержку, указав Order ID: ' + str(order_id))
+        await safe_edit_or_send(callback.message, f'❌ Ошибка настройки ключа: {e}\nОбратитесь в поддержку, указав Order ID: ' + str(order_id))
 
 @router.callback_query(F.data == 'back_to_server_select')
 async def back_to_server_select(callback: CallbackQuery, state: FSMContext):
@@ -139,4 +139,4 @@ async def back_to_server_select(callback: CallbackQuery, state: FSMContext):
         tariff_id = order.get('tariff_id') if order else None
     servers = get_servers_for_key(tariff_id) if tariff_id else get_active_servers()
     await state.set_state(NewKeyConfig.waiting_for_server)
-    await callback.message.edit_text('🔑 Выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '🔑 Выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers), parse_mode='Markdown')

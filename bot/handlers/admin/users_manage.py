@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database.requests import get_users_stats, get_all_users_paginated, get_user_by_telegram_id, toggle_user_ban, get_user_vpn_keys, get_user_payments_stats, get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin, get_active_servers, get_all_tariffs, get_user_balance, get_user_referral_coefficient, add_to_balance, deduct_from_balance, set_user_referral_coefficient
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user_ban_confirm_kb, key_view_kb, add_key_server_kb, add_key_inbound_kb, add_key_step_kb, add_key_confirm_kb, users_input_cancel_kb, key_action_cancel_kb, back_and_home_kb, home_only_kb
 from bot.services.vpn_api import get_client_from_server_data, VPNAPIError, format_traffic
@@ -52,7 +52,7 @@ async def _show_user_view_edit(callback: CallbackQuery, state: FSMContext, teleg
     await state.set_state(AdminStates.user_view)
     await state.update_data(current_user_telegram_id=telegram_id)
     (text, keyboard) = _format_user_card(user)
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=keyboard, parse_mode='Markdown')
     await callback.answer()
 
 def _format_user_card(user: dict) -> tuple[str, any]:
@@ -163,7 +163,7 @@ async def request_ban_confirmation(callback: CallbackQuery, state: FSMContext):
     else:
         action = 'заблокировать'
     text = f'⚠️ *Подтверждение*\n\nВы уверены, что хотите *{action}* пользователя `{format_user_display(user)}`?'
-    await callback.message.edit_text(text, reply_markup=user_ban_confirm_kb(telegram_id, is_banned), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=user_ban_confirm_kb(telegram_id, is_banned), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.startswith('admin_user_ban_confirm:'))
@@ -197,7 +197,7 @@ async def start_coefficient_edit(callback: CallbackQuery, state: FSMContext):
     current_coefficient = get_user_referral_coefficient(user['id'])
     await state.set_state(AdminStates.waiting_coefficient)
     await state.update_data(coefficient_user_telegram_id=telegram_id, coefficient_edit_message_id=callback.message.message_id)
-    await callback.message.edit_text(f'📊 *Редактирование реферального коэффициента*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n\nТекущий реферальный коэффициент: *{current_coefficient}x*\n\nВведите новый реферальный коэффициент (0.0 - 10.0):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'📊 *Редактирование реферального коэффициента*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n\nТекущий реферальный коэффициент: *{current_coefficient}x*\n\nВведите новый реферальный коэффициент (0.0 - 10.0):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
     await callback.answer()
 
 @router.message(AdminStates.waiting_coefficient, F.text, ~F.text.startswith('/'))
@@ -245,7 +245,7 @@ async def start_balance_add(callback: CallbackQuery, state: FSMContext):
     balance_rub = current_balance / 100
     await state.set_state(AdminStates.waiting_balance_amount)
     await state.update_data(balance_user_telegram_id=telegram_id, balance_operation='add')
-    await callback.message.edit_text(f'💰 *Пополнение баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму пополнения в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'💰 *Пополнение баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму пополнения в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data.regexp('^admin_user_balance_deduct:(\\d+)$'))
@@ -263,7 +263,7 @@ async def start_balance_deduct(callback: CallbackQuery, state: FSMContext):
     balance_rub = current_balance / 100
     await state.set_state(AdminStates.waiting_balance_amount)
     await state.update_data(balance_user_telegram_id=telegram_id, balance_operation='deduct')
-    await callback.message.edit_text(f'💸 *Списание баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму списания в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'💸 *Списание баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму списания в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
     await callback.answer()
 
 @router.message(AdminStates.waiting_balance_amount, F.text, ~F.text.startswith('/'))

@@ -81,7 +81,7 @@ async def show_groups_list(callback: CallbackQuery, state: FSMContext):
         text += f"\n📂 *{g['name']}*{is_default}\n"
         text += f"   Тарифов: {g['tariffs_count']} | Серверов: {g['servers_count']}\n"
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=groups_list_kb(groups),
         parse_mode="Markdown"
@@ -102,7 +102,7 @@ async def group_add_start(callback: CallbackQuery, state: FSMContext):
     
     await state.set_state(AdminStates.group_add_name)
     
-    sent = await callback.message.edit_text(
+    sent = await safe_edit_or_send(callback.message, 
         "📂 *Новая группа*\n\n"
         "⚠️ После добавления второй группы у пользователей появится "
         "разделение тарифов и серверов по группам.\n\n"
@@ -120,7 +120,7 @@ async def group_add_name_handler(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     name = get_message_text_for_storage(message, 'plain').strip()
     
     if not name or len(name) > 30:
@@ -236,7 +236,7 @@ async def group_view_handler(callback: CallbackQuery, state: FSMContext):
         for s in servers:
             text += f"  • {s['name']}\n"
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=group_view_kb(group_id),
         parse_mode="Markdown"
@@ -261,7 +261,7 @@ async def group_edit_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.group_edit_name)
     await state.update_data(edit_group_id=group_id, edit_message_id=callback.message.message_id)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"✏️ *Переименование группы*\n\n"
         f"Текущее название: *{group['name']}*\n\n"
         "Введите новое название (макс. 30 символов):",
@@ -277,7 +277,7 @@ async def group_edit_name_handler(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     name = get_message_text_for_storage(message, 'plain').strip()
     
     if not name or len(name) > 30:
@@ -370,7 +370,7 @@ async def group_delete_start(callback: CallbackQuery, state: FSMContext):
     
     text += "Вы уверены?"
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=group_delete_confirm_kb(group_id),
         parse_mode="Markdown"

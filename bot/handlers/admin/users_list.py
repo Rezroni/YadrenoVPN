@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database.requests import get_users_stats, get_all_users_paginated, get_user_by_telegram_id, toggle_user_ban, get_user_vpn_keys, get_user_payments_stats, get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin, get_active_servers, get_all_tariffs, get_user_balance, get_user_referral_coefficient, add_to_balance, deduct_from_balance, set_user_referral_coefficient
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md
+from bot.utils.text import escape_md, safe_edit_or_send
 from bot.handlers.admin.users_manage import _show_user_view
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user_ban_confirm_kb, key_view_kb, add_key_server_kb, add_key_inbound_kb, add_key_step_kb, add_key_confirm_kb, users_input_cancel_kb, key_action_cancel_kb, back_and_home_kb, home_only_kb
@@ -28,7 +28,7 @@ async def show_users_menu(callback: CallbackQuery, state: FSMContext):
     await state.update_data(users_filter='all', users_page=0)
     stats = get_users_stats()
     text = f"👥 *Пользователи*\n\n📊 *Статистика:*\n👤 Всего: *{stats['total']}*\n✅ С активными ключами: *{stats['active']}*\n❌ Без активных ключей: *{stats['inactive']}*\n🆕 Никогда не покупали: *{stats['never_paid']}*\n🚫 Ключ истёк: *{stats['expired']}*"
-    await callback.message.edit_text(text, reply_markup=users_menu_kb(stats), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=users_menu_kb(stats), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data == 'admin_users_list')
@@ -76,7 +76,7 @@ async def _show_users_page(callback: CallbackQuery, state: FSMContext, page: int
         text = f'👥 *Пользователи* — {filter_name}\n\nПоказано: {len(users)} из {total}\nСтраница {page + 1} из {total_pages}'
     else:
         text = f'👥 *Пользователи* — {filter_name}\n\n😕 Пользователей не найдено'
-    await callback.message.edit_text(text, reply_markup=users_list_kb(users, page, total_pages, filter_type), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=users_list_kb(users, page, total_pages, filter_type), parse_mode='Markdown')
     await callback.answer()
 
 @router.callback_query(F.data == 'admin_users_select')

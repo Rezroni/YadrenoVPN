@@ -110,7 +110,7 @@ async def show_tariffs_list(callback: CallbackQuery, state: FSMContext):
         
         text = "\n".join(lines)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=tariffs_list_kb(tariffs),
         parse_mode="Markdown"
@@ -160,7 +160,7 @@ async def render_tariff_view(message: Message, tariff_id: int, state: FSMContext
         f"\n{status_emoji}",
     ])
     
-    await message.edit_text(
+    await safe_edit_or_send(message, 
         "\n".join(lines),
         reply_markup=tariff_view_kb(tariff_id, tariff['is_active'], groups_count > 1),
         parse_mode="Markdown"
@@ -309,7 +309,7 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
         await state.set_state(AdminStates.tariff_select_group)
         await state.update_data(tariff_data={}, include_crypto=include_crypto, crypto_mode=crypto_mode)
         
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             "📝 *Добавление тарифа*\n\n"
             "Выберите группу для нового тарифа:",
             reply_markup=group_select_kb(groups, "tariff_group_select", "admin_tariffs"),
@@ -328,7 +328,7 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
     
     text = get_add_step_text(1, {}, include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_tariff_step_kb(1, total),
         parse_mode="Markdown"
@@ -357,7 +357,7 @@ async def tariff_group_selected(callback: CallbackQuery, state: FSMContext):
     
     text = f"📂 Группа: *{group_name}*\n\n" + get_add_step_text(1, {}, include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_tariff_step_kb(1, total),
         parse_mode="Markdown"
@@ -394,7 +394,7 @@ async def add_tariff_back(callback: CallbackQuery, state: FSMContext):
     
     text = get_add_step_text(new_step, data.get('tariff_data', {}), include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=add_tariff_step_kb(new_step, total),
         parse_mode="Markdown"
@@ -417,7 +417,7 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
     if current_step > total:
         return
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     param = params[current_step - 1]
     value = get_message_text_for_storage(message, 'plain')
@@ -551,7 +551,7 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
             group_id=selected_group_id
         )
         
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             f"✅ *Тариф успешно добавлен!*\n\n"
             f"📋 {tariff_data['name']}",
             parse_mode="Markdown"
@@ -565,7 +565,7 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
         
     except Exception as e:
         logger.error(f"Ошибка добавления тарифа: {e}")
-        await callback.message.edit_text(
+        await safe_edit_or_send(callback.message, 
             f"❌ *Ошибка сохранения*\n\n`{e}`",
             reply_markup=back_and_home_kb("admin_tariffs"),
             parse_mode="Markdown"
@@ -623,7 +623,7 @@ async def start_edit_tariff(callback: CallbackQuery, state: FSMContext):
     text = get_edit_tariff_text(tariff, 0, include_crypto, crypto_mode)
     total = get_total_tariff_params(include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_tariff_kb(0, total),
         parse_mode="Markdown"
@@ -655,7 +655,7 @@ async def edit_tariff_prev(callback: CallbackQuery, state: FSMContext):
     text = get_edit_tariff_text(tariff, new_param, include_crypto, crypto_mode)
     total = get_total_tariff_params(include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_tariff_kb(new_param, total),
         parse_mode="Markdown"
@@ -687,7 +687,7 @@ async def edit_tariff_next(callback: CallbackQuery, state: FSMContext):
     
     text = get_edit_tariff_text(tariff, new_param, include_crypto, crypto_mode)
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         text,
         reply_markup=edit_tariff_kb(new_param, total),
         parse_mode="Markdown"
@@ -704,7 +704,7 @@ async def edit_tariff_value(message: Message, state: FSMContext):
     include_crypto = data.get('include_crypto', False)
     crypto_mode = data.get('crypto_mode', 'standard')
     
-    from bot.utils.text import get_message_text_for_storage
+    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send
     
     param = get_tariff_param_by_index(current_param, include_crypto, crypto_mode)
     value = get_message_text_for_storage(message, 'plain')
@@ -787,7 +787,7 @@ async def tariff_change_group_start(callback: CallbackQuery, state: FSMContext):
     
     groups = get_all_groups()
     
-    await callback.message.edit_text(
+    await safe_edit_or_send(callback.message, 
         f"📂 *Смена группы тарифа «{tariff['name']}»*\n\n"
         "Выберите новую группу:",
         reply_markup=group_select_kb(groups, "tariff_group_change", f"admin_tariff_view:{tariff_id}"),
