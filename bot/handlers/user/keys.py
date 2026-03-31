@@ -14,6 +14,8 @@ from bot.states.user_states import RenameKey, ReplaceKey
 from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 @router.message(Command('mykeys'))

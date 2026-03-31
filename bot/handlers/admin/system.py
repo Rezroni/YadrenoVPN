@@ -39,6 +39,8 @@ from bot.keyboards.admin import (
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 
@@ -422,6 +424,7 @@ async def edit_texts_menu(callback: CallbackQuery, state: FSMContext):
     builder.row(InlineKeyboardButton(text="📝 Главная страница", callback_data="edit_text:main_page_text"))
     builder.row(InlineKeyboardButton(text="📝 Справка (текст)", callback_data="edit_text:help_page_text"))
     builder.row(InlineKeyboardButton(text="📝 Текст перед оплатой", callback_data="edit_text:prepayment_text"))
+    builder.row(InlineKeyboardButton(text="📝 Текст выдачи ключа", callback_data="edit_text:key_delivery_text"))
     builder.row(InlineKeyboardButton(text="📢 Ссылка: Новости", callback_data="edit_link:news"))
     builder.row(InlineKeyboardButton(text="💬 Ссылка: Поддержка", callback_data="edit_link:support"))
     
@@ -438,45 +441,54 @@ async def edit_texts_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("edit_text:"))
 async def edit_text_start(callback: CallbackQuery, state: FSMContext):
-    """Начало редактирования конкретного текста."""
+    """Начало редактирования конкретного текста через универсальный редактор."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
 
-    from database.requests import get_setting
-    from bot.keyboards.admin import cancel_kb
-    from bot.utils.text import format_text_for_edit, safe_edit_or_send
+    from bot.handlers.admin.message_editor import show_message_editor
     
     key = callback.data.split(":")[1]
     
     # Белый список допустимых ключей — защита от инъекции произвольного ключа настроек
-    # (HIGH-3: без этого admin мог передать edit_text:crypto_secret_key и прочитать/изменить ключ)
     ALLOWED_KEYS = {
         'main_page_text',
         'help_page_text',
         'prepayment_text',
+        'key_delivery_text',
     }
     
     if key not in ALLOWED_KEYS:
         await callback.answer("⛔ Недопустимый параметр", show_alert=True)
         return
     
-    # Названия для заголовка
-    titles = {
-        'main_page_text': 'Текст главной страницы',
-        'help_page_text': 'Текст страницы справки',
-        'prepayment_text': 'Текст перед оплатой',
+    # Тексты справки для каждого ключа
+    help_texts = {
+        'main_page_text': (
+            "📝 *Справка: Текст главной страницы*\n\n"
+            "Поддерживается MarkdownV2 форматирование.\n\n"
+            "Переменные:\n"
+            "• `%тарифы%` — список тарифов с ценами\n"
+            "• `%без_тарифов%` — не добавлять тарифы"
+        ),
+        'key_delivery_text': (
+            "📝 *Справка: Текст выдачи ключа*\n\n"
+            "Формат: **Только текст** (без фото).\n\n"
+            "Переменные:\n"
+            "• `%ключ%` — вместо этого тега будет подставлен блок с ссылкой на ключ."
+        ),
     }
     
-    current_value = get_setting(key, "Не задано")
+    current_allowed_types = ['text'] if key == 'key_delivery_text' else ['text', 'photo']
+    parse_mode = 'Markdown' if key == 'key_delivery_text' else None
     
-    await state.set_state(AdminStates.waiting_for_text)
-    await state.update_data(editing_key=key, editing_message=callback.message)
-    
-    await safe_edit_or_send(callback.message, 
-        format_text_for_edit(titles.get(key, key), current_value),
-        reply_markup=cancel_kb("admin_edit_texts"),
-        parse_mode="MarkdownV2"
+    await show_message_editor(
+        callback.message, state,
+        key=key,
+        back_callback='admin_edit_texts',
+        help_text=help_texts.get(key),
+        allowed_types=current_allowed_types,
+        parse_mode=parse_mode,
     )
     await callback.answer()
 
@@ -572,8 +584,8 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
         'support': 'Поддержка'
     }
     
-    await state.set_state(AdminStates.waiting_for_text)
-    await state.update_data(editing_key=link_key, return_to=f"edit_link:{link_type}")
+    await state.set_state(AdminStates.waiting_for_link_url)
+    await state.update_data(editing_key=link_key, return_to=f"edit_link:{link_type}", editing_message=callback.message)
     
     await safe_edit_or_send(callback.message, 
         f"🔗 *Изменение ссылки: {titles[link_type]}*\n\n"
@@ -583,6 +595,70 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
     await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_link_url, ~F.text.startswith('/'))
+async def edit_link_url_save(message: Message, state: FSMContext):
+    """Сохранение новой ссылки."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    from database.requests import set_setting
+    from bot.keyboards.admin import back_and_home_kb, cancel_kb
+    from bot.utils.text import get_message_text_for_storage
+    
+    data = await state.get_data()
+    key = data.get('editing_key')
+    return_to = data.get('return_to', 'admin_edit_texts')
+    editing_message = data.get('editing_message')
+    
+    if not key:
+        await state.clear()
+        await message.answer("❌ Ошибка состояния.")
+        return
+    
+    new_value = get_message_text_for_storage(message, 'plain')
+    
+    # Валидация URL
+    if not new_value.startswith(('http://', 'https://')):
+        await message.answer(
+            "❌ *Ошибка:* Ссылка должна начинаться с `http://` или `https://`\n\n"
+            f"Вы ввели: `{new_value}`\n\n"
+            "Попробуйте ещё раз или нажмите Отмена.",
+            reply_markup=cancel_kb(return_to),
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    set_setting(key, new_value)
+    await state.clear()
+    
+    # Перерисовываем сообщение
+    if editing_message:
+        try:
+            await safe_edit_or_send(editing_message,
+                f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
+                reply_markup=back_and_home_kb(return_to),
+                parse_mode="Markdown"
+            )
+        except Exception:
+            await message.answer(
+                f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
+                reply_markup=back_and_home_kb(return_to),
+                parse_mode="Markdown"
+            )
+    else:
+        await message.answer(
+            f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
+            reply_markup=back_and_home_kb(return_to),
+            parse_mode="Markdown"
+        )
 
 
 @router.callback_query(F.data.startswith("toggle_link_hidden:"))
@@ -684,77 +760,6 @@ async def edit_link_name_save(message: Message, state: FSMContext):
     )
 
 
-@router.message(AdminStates.waiting_for_text, ~F.text.startswith('/'))
-async def edit_text_save(message: Message, state: FSMContext):
-    """Сохранение нового значения текста. Игнорирует команды (/start, /help и т.д.)."""
-    from database.requests import set_setting
-    from bot.keyboards.admin import back_and_home_kb, cancel_kb
-    from bot.utils.text import get_message_text_for_storage, format_text_after_save
-    
-    data = await state.get_data()
-    key = data.get('editing_key')
-    editing_message = data.get('editing_message')
-    return_to = data.get('return_to', 'admin_edit_texts')
-    
-    if not key:
-        await state.clear()
-        await message.answer("❌ Ошибка состояния.")
-        return
-    
-    # Для ссылок используем plain (без экранирования), для текстов — markdown
-    text_type = 'plain' if key.endswith('_channel_link') else 'markdown'
-    new_value = get_message_text_for_storage(message, text_type)
-    
-    # Валидация для ссылок: должны начинаться с http:// или https://
-    if key.endswith('_channel_link'):
-        if not new_value.startswith(('http://', 'https://')):
-            await message.answer(
-                "❌ *Ошибка:* Ссылка должна начинаться с `http://` или `https://`\n\n"
-                f"Вы ввели: `{new_value}`\n\n"
-                "Попробуйте ещё раз или нажмите Отмена.",
-                reply_markup=cancel_kb(return_to),
-                parse_mode="Markdown"
-            )
-            return
-    
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except:
-        pass
-    
-    # Сохраняем
-    set_setting(key, new_value)
-    
-    # Названия для заголовка
-    titles = {
-        'main_page_text': 'Текст главной страницы',
-        'help_page_text': 'Текст страницы справки',
-        'prepayment_text': 'Текст перед оплатой',
-    }
-    
-    await state.clear()
-    
-    # Редактируем сообщение с новым текстом
-    if editing_message:
-        try:
-            await safe_edit_or_send(editing_message, 
-                format_text_after_save(titles.get(key, key), new_value),
-                reply_markup=back_and_home_kb(return_to),
-                parse_mode="MarkdownV2"
-            )
-        except:
-            await message.answer(
-                format_text_after_save(titles.get(key, key), new_value),
-                reply_markup=back_and_home_kb(return_to),
-                parse_mode="MarkdownV2"
-            )
-    else:
-        await message.answer(
-            format_text_after_save(titles.get(key, key), new_value),
-            reply_markup=back_and_home_kb(return_to),
-            parse_mode="MarkdownV2"
-        )
 
 
 # ============================================================================
@@ -886,3 +891,51 @@ async def download_log_errors(callback: CallbackQuery, state: FSMContext):
         document=FSInputFile(error_log_path, filename="errors.log"),
         caption="⚠️ Лог ошибок и предупреждений"
     )
+
+@router.callback_query(F.data == "admin_clear_logs_confirm")
+async def confirm_clear_logs(callback: CallbackQuery, state: FSMContext):
+    """Показывает предупреждение перед очисткой логов."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.keyboards.admin import back_button
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Да, стереть", callback_data="admin_clear_logs_do"))
+    builder.row(back_button("admin_logs_menu"))
+    
+    await safe_edit_or_send(callback.message,
+        "🗑️ *Очистка логов*\n\n"
+        "Вы уверены, что хотите полностью стереть файлы логов `bot.log` и `errors.log`?\n"
+        "Это безвозвратное действие.",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_clear_logs_do")
+async def do_clear_logs(callback: CallbackQuery, state: FSMContext):
+    """Очищает файлы логов."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    try:
+        log_path = "logs/bot.log"
+        if os.path.exists(log_path):
+            with open(log_path, 'w', encoding='utf-8') as f:
+                f.write("") 
+        
+        error_log_path = "logs/errors.log"
+        if os.path.exists(error_log_path):
+            with open(error_log_path, 'w', encoding='utf-8') as f:
+                f.write("")
+                
+        await callback.answer("🗑️ Логи успешно очищены!", show_alert=True)
+    except Exception as e:
+        logger.error(f"Ошибка при очистке логов: {e}")
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+    
+    await show_logs_menu(callback, state)

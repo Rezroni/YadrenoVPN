@@ -61,19 +61,28 @@ async def send_key_with_qr(
         qr_bytes = generate_qr_code(link)
         
         # 3. Формируем сообщение
-        title = "✅ *Ваш новый VPN-ключ!*" if is_new else "📋 *Ваш VPN-ключ*"
-        caption = (
-            f"{title}\n\n"
-            f"```\n{link}\n```\n"
-            "☝️ Нажмите на ссылку, чтобы скопировать.\n\n"
+        from bot.utils.message_editor import get_message_data
+        
+        default_key_delivery = (
+            "✅ *Ваш VPN-ключ!*\n\n"
+            "%ключ%\n"
+            "☝️ Нажмите, чтобы скопировать.\n\n"
             "📱 *Инструкция:*\n"
             "1. Скопируйте ссылку или отсканируйте QR-код.\n"
-            "2. Импортируйте в V2RayNG / Hiddify / Streisand.\n"
+            "2. Импортируйте в свой клиент. Какие именно клиент подходит смотри в инструкции по кнопке ниже.\n"
             "3. Нажмите подключиться!"
         )
         
+        delivery_data = get_message_data('key_delivery_text', default_key_delivery)
+        base_caption = delivery_data.get('text', default_key_delivery)
+        
+        # Заменяем тег %ключ% на код-блок
+        key_snippet = f"```\n{link}\n```"
+        caption = base_caption.replace('%ключ%', key_snippet)
+        
         # Если caption слишком длинный (Telegram limit 1024), сокращаем
         if len(caption) > 1024:
+             title = "✅ *Ваш новый VPN-ключ!*" if is_new else "📋 *Ваш VPN-ключ*"
              caption = (
                 f"{title}\n\n"
                 "👇 *Ваша ссылка доступа (нажмите для копирования):*\n"

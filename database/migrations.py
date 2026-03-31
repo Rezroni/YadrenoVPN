@@ -28,7 +28,7 @@ def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
 
 
 # Текущая версия схемы БД
-LATEST_VERSION = 13
+LATEST_VERSION = 14
 
 
 def get_current_version() -> int:
@@ -841,6 +841,69 @@ def migration_13(conn: sqlite3.Connection) -> None:
     logger.info("Миграция v13 применена")
 
 
+def migration_14(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v14:
+    - Замена тегов {days} на %дней% и {keyname} на %имяключа% в notification_text
+    - Добавление key_delivery_text для кастомизации сообщения с ключом
+    """
+    import json
+    logger.info("Применение миграции v14 (Теги уведомлений и текст выдачи ключа)...")
+
+    # 1. Замена тегов в notification_text
+    cursor = conn.execute("SELECT value FROM settings WHERE key = 'notification_text'")
+    row = cursor.fetchone()
+    
+    if row and row['value']:
+        current_val = row['value']
+        # Может быть JSON или обычная строка
+        try:
+            data = json.loads(current_val)
+            if isinstance(data, dict) and 'text' in data:
+                # Это JSON
+                data['text'] = data['text'].replace('{days}', '%дней%').replace('{keyname}', '%имяключа%')
+                new_val = json.dumps(data, ensure_ascii=False)
+            else:
+                # JSON но не тот формат
+                new_val = current_val.replace('{days}', '%дней%').replace('{keyname}', '%имяключа%')
+        except (json.JSONDecodeError, TypeError):
+            # Это строка
+            new_val = current_val.replace('{days}', '%дней%').replace('{keyname}', '%имяключа%')
+            
+        conn.execute(
+            "UPDATE settings SET value = ? WHERE key = 'notification_text'",
+            (new_val,)
+        )
+        logger.info("Теги в notification_text обновлены")
+
+    # 2. Добавление текста выдачи ключа по умолчанию
+    default_key_delivery = (
+        "✅ *Ваш VPN-ключ!*\n\n"
+        "%ключ%\n"
+        "☝️ Нажмите, чтобы скопировать.\n\n"
+        "📱 *Инструкция:*\n"
+        "1. Скопируйте ссылку или отсканируйте QR-код.\n"
+        "2. Импортируйте в свой клиент. Какие именно клиент подходит смотри в инструкции по кнопке ниже.\n"
+        "3. Нажмите подключиться!"
+    )
+    
+    # Форматируем как JSON для нового message_editor
+    key_delivery_json = json.dumps({
+        'text': default_key_delivery,
+        'photo_file_id': None,
+        'video_file_id': None,
+        'animation_file_id': None
+    }, ensure_ascii=False)
+
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+        ('key_delivery_text', key_delivery_json)
+    )
+    logger.info("Добавлен текст key_delivery_text по умолчанию")
+    
+    logger.info("Миграция v14 применена")
+
+
 MIGRATIONS = {
     1: migration_1,
     2: migration_2,
@@ -855,6 +918,7 @@ MIGRATIONS = {
     11: migration_11,
     12: migration_12,
     13: migration_13,
+    14: migration_14,
 }
 
 

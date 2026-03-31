@@ -9,6 +9,8 @@ from config import ADMIN_IDS
 from bot.handlers.user.payments.base import _format_price_compact, _is_cards_via_yookassa_direct
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 async def _show_balance_payment_screen(callback: CallbackQuery, state: FSMContext, tariff_id: int, user_internal_id: int, key_id: int=None):

@@ -66,7 +66,10 @@ async def show_referral_system(callback: CallbackQuery):
     referral_link = f"https://t.me/{bot_username}?start=ref_{referral_code}"
     
     reward_type = get_referral_reward_type()
-    conditions_text = get_referral_conditions_text()
+    from bot.utils.message_editor import get_message_data
+    conditions_data = get_message_data('referral_conditions_text', '')
+    conditions_text = conditions_data.get('text', '')
+    conditions_photo = conditions_data.get('photo_file_id')
     all_levels = get_referral_levels()
     active_levels = get_active_referral_levels()
     stats = get_referral_stats(user_internal_id)
@@ -120,6 +123,7 @@ async def show_referral_system(callback: CallbackQuery):
     await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_menu_kb(),
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        photo=conditions_photo,
     )
     await callback.answer()

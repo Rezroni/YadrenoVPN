@@ -9,6 +9,8 @@ from config import ADMIN_IDS
 from bot.handlers.user.payments.base import finalize_payment_ui
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 @router.callback_query(F.data.startswith('pay_cards'))
@@ -259,6 +261,9 @@ async def check_yookassa_payment(callback: CallbackQuery, state: FSMContext):
                     from database.requests import get_tariff_by_id
                     _tariff = get_tariff_by_id(updated_order.get('tariff_id'))
                     referral_amount = int((_tariff.get('price_rub', 0) or 0) * 100) if _tariff else 0
+                
+                logger.info(f"Yookassa QR referral logic: payer={user_internal_id}, days={days}, referral_amount={referral_amount}, tariff_id={updated_order.get('tariff_id')}")
+                
                 await process_referral_reward(user_internal_id, days, referral_amount, 'yookassa_qr')
                 try:
                     await callback.message.delete()

@@ -123,7 +123,7 @@ async def finalize_payment_ui(message: Message, state: FSMContext, text: str, or
         await start_new_key_config(message, state, order['order_id'], key_id)
     else:
         from bot.handlers.user.keys import show_key_details
-        await show_key_details(telegram_id=user_id, key_id=key_id, send_function=message.answer, prepend_text=text)
+        await show_key_details(telegram_id=user_id, key_id=key_id, message=message, is_callback=False, prepend_text=text)
 
 @router.callback_query(F.data.startswith('renew_invoice_cancel:'))
 async def renew_invoice_cancel_handler(callback: CallbackQuery):

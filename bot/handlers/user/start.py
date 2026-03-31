@@ -14,13 +14,22 @@ from bot.states.user_states import RenameKey, ReplaceKey
 from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
-def get_welcome_text(is_admin: bool=False) -> str:
-    """Формирует приветственный текст с реальными тарифами из БД."""
+def get_welcome_text(is_admin: bool=False) -> tuple:
+    """Формирует приветственный текст с реальными тарифами из БД.
+    
+    Returns:
+        Кортеж (text, photo_file_id) — текст и опциональное фото
+    """
     from database.requests import get_all_tariffs, get_setting, is_crypto_configured, is_stars_enabled, is_cards_enabled, is_yookassa_qr_configured
     from bot.utils.text import escape_md2
-    welcome_text = get_setting('main_page_text', '🔐 *Добро пожаловать в VPN\\-бот\\!*')
+    from bot.utils.message_editor import get_message_data
+    welcome_data = get_message_data('main_page_text', '🔐 *Добро пожаловать в VPN\\-бот\\!*')
+    welcome_text = welcome_data.get('text', '🔐 *Добро пожаловать в VPN\\-бот\\!*')
+    photo_file_id = welcome_data.get('photo_file_id')
     crypto_enabled = is_crypto_configured()
     stars_enabled = is_stars_enabled()
     cards_enabled = is_cards_enabled()
@@ -43,10 +52,10 @@ def get_welcome_text(is_admin: bool=False) -> str:
             tariff_lines.append(f"• {escape_md2(tariff['name'])} — {price_display}")
     tariff_text = '\n'.join(tariff_lines)
     if '%без\\_тарифов%' in welcome_text:
-        return welcome_text.replace('%без\\_тарифов%', '')
+        return (welcome_text.replace('%без\\_тарифов%', ''), photo_file_id)
     if '%тарифы%' not in welcome_text:
         welcome_text = f'{welcome_text}\n\n%тарифы%'
-    return welcome_text.replace('%тарифы%', tariff_text)
+    return (welcome_text.replace('%тарифы%', tariff_text), photo_file_id)
 
 @router.message(Command('start'), StateFilter('*'))
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
@@ -69,7 +78,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         await message.answer('⛔ *Доступ заблокирован*\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', parse_mode='Markdown')
         return
     is_admin = user_id in ADMIN_IDS
-    text = get_welcome_text(is_admin)
+    (text, welcome_photo) = get_welcome_text(is_admin)
     args = command.args
     if args and args.startswith('bill'):
         from bot.services.billing import process_crypto_payment
@@ -100,8 +109,12 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     from database.requests import is_trial_enabled, get_trial_tariff_id, has_used_trial
     show_trial = is_trial_enabled() and get_trial_tariff_id() is not None and (not has_used_trial(user_id))
     show_referral = is_referral_enabled()
+    kb = main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral)
     try:
-        await message.answer(text, reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral), parse_mode='MarkdownV2')
+        if welcome_photo:
+            await message.answer_photo(photo=welcome_photo, caption=text, reply_markup=kb, parse_mode='MarkdownV2')
+        else:
+            await message.answer(text, reply_markup=kb, parse_mode='MarkdownV2')
     except TelegramForbiddenError:
         logger.warning(f'User {user_id} blocked the bot during /start')
     except Exception as e:
@@ -116,11 +129,12 @@ async def callback_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     is_admin = user_id in ADMIN_IDS
-    text = get_welcome_text(is_admin)
+    (text, welcome_photo) = get_welcome_text(is_admin)
     from database.requests import is_trial_enabled, get_trial_tariff_id, has_used_trial
     show_trial = is_trial_enabled() and get_trial_tariff_id() is not None and (not has_used_trial(user_id))
     show_referral = is_referral_enabled()
-    await safe_edit_or_send(callback.message, text, reply_markup=main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral), parse_mode='MarkdownV2')
+    kb = main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral)
+    await safe_edit_or_send(callback.message, text, reply_markup=kb, parse_mode='MarkdownV2', photo=welcome_photo)
     await callback.answer()
 
 @router.message(Command('help'))
@@ -142,7 +156,10 @@ async def show_help(message: 'Message', is_callback: bool = False):
     from bot.keyboards.admin import home_only_kb
     from bot.keyboards.user import help_kb
     from database.requests import get_setting
-    help_text = get_setting('help_page_text', '❓ *Справка*')
+    from bot.utils.message_editor import get_message_data
+    help_data = get_message_data('help_page_text', '❓ *Справка*')
+    help_text = help_data.get('text', '❓ *Справка*')
+    help_photo = help_data.get('photo_file_id')
     default_news = 'https://t.me/YadrenoRu'
     default_support = 'https://t.me/YadrenoChat'
     news_link = get_setting('news_channel_link', default_news)
@@ -157,9 +174,12 @@ async def show_help(message: 'Message', is_callback: bool = False):
     support_name = get_setting('support_button_name', 'Поддержка')
     kb = help_kb(news_link, support_link, news_hidden=news_hidden, support_hidden=support_hidden, news_name=news_name, support_name=support_name)
     if is_callback:
-        await safe_edit_or_send(message, help_text, reply_markup=kb, parse_mode='MarkdownV2')
+        await safe_edit_or_send(message, help_text, reply_markup=kb, parse_mode='MarkdownV2', photo=help_photo)
     else:
-        await message.answer(help_text, reply_markup=kb, parse_mode='MarkdownV2')
+        if help_photo:
+            await message.answer_photo(photo=help_photo, caption=help_text, reply_markup=kb, parse_mode='MarkdownV2')
+        else:
+            await message.answer(help_text, reply_markup=kb, parse_mode='MarkdownV2')
 
 @router.callback_query(F.data == 'help')
 async def help_handler(callback: CallbackQuery):

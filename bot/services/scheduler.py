@@ -250,11 +250,18 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
     logger.info("⏳ Запуск проверки истекающих ключей...")
     try:
         days = int(get_setting('notification_days', '3'))
-        notification_text = get_setting('notification_text', 
-            '⚠️ *Ваш VPN-ключ {keyname} скоро истекает!*\n\n'
-            'Через {days} дней закончится срок действия вашего ключа.\n\n'
+        from bot.utils.message_editor import get_message_data
+        notification_data = get_message_data('notification_text',
+            '⚠️ *Ваш VPN-ключ %имяключа% скоро истекает!*\n\n'
+            'Через %дней% дней закончится срок действия вашего ключа.\n\n'
             'Продлите подписку, чтобы сохранить доступ к VPN без перерыва!'
         )
+        notification_text = notification_data.get('text',
+            '⚠️ *Ваш VPN-ключ %имяключа% скоро истекает!*\n\n'
+            'Через %дней% дней закончится срок действия вашего ключа.\n\n'
+            'Продлите подписку, чтобы сохранить доступ к VPN без перерыва!'
+        )
+        notification_photo = notification_data.get('photo_file_id')
         
         expiring_keys = get_expiring_keys(days)
         sent_count = 0
@@ -270,7 +277,7 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
                 continue
             
             # Формируем текст с подстановкой дней и имени ключа
-            text = notification_text.format(days=days_left, keyname=keyname)
+            text = notification_text.replace('%дней%', str(days_left)).replace('%имяключа%', str(keyname))
             
             # Клавиатура с кнопками "Мои ключи" и "На главную"
             builder = InlineKeyboardBuilder()
@@ -279,12 +286,21 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
             kb = builder.as_markup()
             
             try:
-                await bot.send_message(
-                    chat_id=user_telegram_id,
-                    text=text,
-                    reply_markup=kb,
-                    parse_mode="Markdown"
-                )
+                if notification_photo:
+                    await bot.send_photo(
+                        chat_id=user_telegram_id,
+                        photo=notification_photo,
+                        caption=text,
+                        reply_markup=kb,
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=user_telegram_id,
+                        text=text,
+                        reply_markup=kb,
+                        parse_mode="Markdown"
+                    )
                 log_notification_sent(vpn_key_id)
                 sent_count += 1
             except Exception as e:

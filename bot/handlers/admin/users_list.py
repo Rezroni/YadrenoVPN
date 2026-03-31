@@ -15,6 +15,8 @@ from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user
 from bot.services.vpn_api import get_client_from_server_data, VPNAPIError, format_traffic
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 USERS_PER_PAGE = 20
 

@@ -35,6 +35,8 @@ from bot.keyboards.admin import (
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 

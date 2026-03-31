@@ -6,41 +6,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-TEXT_SEPARATOR_RAW = "=" * 30
-TEXT_SEPARATOR = TEXT_SEPARATOR_RAW.replace("=", "\\=")
-
-
-def format_text_for_edit(title: str, current_text: str) -> str:
-    title_escaped = escape_md2(title)
-    return (
-        f"✏️ *Редактирование: {title_escaped}*\n\n"
-        f"📜 *Текущее значение:*\n"
-        f"{TEXT_SEPARATOR}\n"
-        f"{current_text}\n"
-        f"{TEXT_SEPARATOR}\n\n"
-        f"👇 Отправьте новое значение \\(или нажмите Отмена\\)\\."
-    )
-
-
-def format_text_after_save(title: str, new_text: str) -> str:
-    title_escaped = escape_md2(title)
-    return (
-        f"✅ *Сохранено: {title_escaped}*\n\n"
-        f"📜 *Новое значение:*\n"
-        f"{TEXT_SEPARATOR}\n"
-        f"{new_text}\n"
-        f"{TEXT_SEPARATOR}"
-    )
-
-
 def get_message_text_for_storage(
     message: Message,
     text_type: Literal['markdown', 'plain'] = 'markdown'
 ) -> str:
+    """Извлекает текст из сообщения для сохранения в БД.
+    
+    Поддерживает как обычные текстовые сообщения (text/md_text),
+    так и медиа-сообщения (caption/md_caption).
+    """
     if text_type == 'markdown':
-        return message.md_text.strip() if message.md_text else (message.text.strip() if message.text else "")
+        # Приоритет: md_text → text → md_caption → caption
+        if message.md_text:
+            return message.md_text.strip()
+        if message.text:
+            return message.text.strip()
+        if hasattr(message, 'md_caption') and message.md_caption:
+            return message.md_caption.strip()
+        if message.caption:
+            return message.caption.strip()
+        return ""
     else:
-        return message.text.strip() if message.text else ""
+        if message.text:
+            return message.text.strip()
+        if message.caption:
+            return message.caption.strip()
+        return ""
 
 
 def escape_md(text: str) -> str:

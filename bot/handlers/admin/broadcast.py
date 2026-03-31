@@ -29,6 +29,8 @@ from bot.keyboards.admin import (
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 
@@ -528,74 +530,24 @@ async def broadcast_save_notify_days(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "broadcast_notify_text")
 async def broadcast_notify_text(callback: CallbackQuery, state: FSMContext):
-    """Показывает/редактирует текст уведомления."""
+    """Показывает/редактирует текст уведомления через универсальный редактор."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from bot.utils.text import format_text_for_edit
+    from bot.handlers.admin.message_editor import show_message_editor
     
-    await state.set_state(AdminStates.broadcast_waiting_notify_text)
-    
-    current_text = get_setting('notification_text', '')
-    
-    await state.update_data(editing_message=callback.message)
-    
-    await safe_edit_or_send(callback.message, 
-        format_text_for_edit("Текст уведомления об истечении", current_text or "Не задано"),
-        reply_markup=broadcast_notify_back_kb(),
-        parse_mode="MarkdownV2"
+    await show_message_editor(
+        callback.message, state,
+        key='notification_text',
+        back_callback='broadcast_notifications',
+        help_text=(
+            "📝 *Справка: Текст уведомления об истечении*\n\n"
+            "Переменные:\n"
+            "• `%дней%` — количество дней до истечения\n"
+            "• `%имяключа%` — имя ключа"
+        ),
+        allowed_types=['text', 'photo'],
     )
     await callback.answer()
 
-
-@router.message(AdminStates.broadcast_waiting_notify_text, ~F.text.startswith('/'))
-async def broadcast_save_notify_text(message: Message, state: FSMContext):
-    """Сохраняет текст уведомления."""
-    if not is_admin(message.from_user.id):
-        return
-    
-    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send, format_text_after_save
-    from bot.keyboards.admin import back_and_home_kb
-    
-    data = await state.get_data()
-    editing_message = data.get('editing_message')
-    
-    if not message.text:
-        await message.answer(
-            "❌ Отправьте текстовое сообщение!",
-            reply_markup=broadcast_notify_back_kb()
-        )
-        return
-    
-    notify_text = get_message_text_for_storage(message, 'markdown')
-    set_setting('notification_text', notify_text)
-    
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except:
-        pass
-    
-    await state.clear()
-    
-    # Редактируем сообщение с новым текстом
-    if editing_message:
-        try:
-            await safe_edit_or_send(editing_message, 
-                format_text_after_save("Текст уведомления об истечении", notify_text),
-                reply_markup=back_and_home_kb("broadcast_notifications"),
-                parse_mode="MarkdownV2"
-            )
-        except:
-            await message.answer(
-                format_text_after_save("Текст уведомления об истечении", notify_text),
-                reply_markup=back_and_home_kb("broadcast_notifications"),
-                parse_mode="MarkdownV2"
-            )
-    else:
-        await message.answer(
-            format_text_after_save("Текст уведомления об истечении", notify_text),
-            reply_markup=back_and_home_kb("broadcast_notifications"),
-            parse_mode="MarkdownV2"
-        )

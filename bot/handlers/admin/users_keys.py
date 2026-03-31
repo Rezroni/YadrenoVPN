@@ -16,6 +16,8 @@ from bot.handlers.admin.users_manage import format_user_display, _show_user_view
 from bot.handlers.admin.users_list import show_users_menu
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 USERS_PER_PAGE = 20
 

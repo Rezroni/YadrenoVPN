@@ -8,6 +8,8 @@ from bot.utils.text import escape_md, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 async def start_new_key_config(message: Message, state: FSMContext, order_id: str, key_id: int=None):

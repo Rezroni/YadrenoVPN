@@ -18,6 +18,8 @@ from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 
@@ -104,76 +106,20 @@ async def admin_trial_toggle(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_trial_edit_text")
 async def admin_trial_edit_text_start(callback: CallbackQuery, state: FSMContext):
-    """Начинает редактирование текста страницы пробной подписки."""
+    """Начинает редактирование текста пробной подписки через универсальный редактор."""
     if not is_admin(callback.from_user.id):
         return
 
-    from bot.states.admin_states import AdminStates
-    from bot.keyboards.admin import trial_edit_text_cancel_kb
-    from bot.utils.text import format_text_for_edit
+    from bot.handlers.admin.message_editor import show_message_editor
 
-    await state.set_state(AdminStates.waiting_for_trial_text)
-
-    from database.requests import get_setting
-    
-    current_text = get_setting('trial_page_text', 'Не задано')
-    
-    await state.update_data(editing_message=callback.message)
-    
-    await safe_edit_or_send(callback.message, 
-        format_text_for_edit("Текст страницы пробной подписки", current_text),
-        reply_markup=trial_edit_text_cancel_kb(),
-        parse_mode="MarkdownV2"
+    await show_message_editor(
+        callback.message, state,
+        key='trial_page_text',
+        back_callback='admin_trial',
+        allowed_types=['text', 'photo'],
     )
     await callback.answer()
 
-
-@router.message(StateFilter(AdminStates.waiting_for_trial_text), F.text, ~F.text.startswith('/'))
-async def admin_trial_edit_text_save(message: Message, state: FSMContext):
-    """Сохраняет новый текст страницы пробной подписки."""
-    if not is_admin(message.from_user.id):
-        return
-
-    from database.requests import set_setting
-    from bot.keyboards.admin import back_and_home_kb
-    from bot.utils.text import get_message_text_for_storage, format_text_after_save
-
-    data = await state.get_data()
-    editing_message = data.get('editing_message')
-
-    new_text = get_message_text_for_storage(message, 'markdown')
-    set_setting('trial_page_text', new_text)
-
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except:
-        pass
-
-    await state.clear()
-
-    # Редактируем сообщение с новым текстом
-    if editing_message:
-        try:
-            await safe_edit_or_send(editing_message, 
-                format_text_after_save("Текст страницы пробной подписки", new_text),
-                reply_markup=back_and_home_kb("admin_trial"),
-                parse_mode="MarkdownV2"
-            )
-        except:
-            await message.answer(
-                format_text_after_save("Текст страницы пробной подписки", new_text),
-                reply_markup=back_and_home_kb("admin_trial"),
-                parse_mode="MarkdownV2"
-            )
-    else:
-        await message.answer(
-            format_text_after_save("Текст страницы пробной подписки", new_text),
-            reply_markup=back_and_home_kb("admin_trial"),
-            parse_mode="MarkdownV2"
-        )
-
-    logger.info(f"Текст пробной подписки обновлён (admin: {message.from_user.id})")
 
 
 # ============================================================================

@@ -14,6 +14,8 @@ from bot.states.user_states import RenameKey, ReplaceKey
 from bot.utils.text import escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 @router.callback_query(F.data == 'buy_key')
@@ -50,14 +52,21 @@ async def buy_key_handler(callback: CallbackQuery):
         await safe_edit_or_send(callback.message, '💳 *Купить ключ*\n\n😔 К сожалению, сейчас оплата недоступна.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
         await callback.answer()
         return
-    prepayment_text = get_setting('prepayment_text') or ''
+    from bot.utils.message_editor import get_message_data
+    prepayment_data = get_message_data('prepayment_text', '')
+    prepayment_text = prepayment_data.get('text', '') or ''
+    prepayment_photo = prepayment_data.get('photo_file_id')
     text = f'{prepayment_text}\n\nВыберите способ оплаты\\:'
+    kb = buy_key_kb(crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, order_id=existing_order_id, show_balance_button=show_balance_button)
     try:
-        await safe_edit_or_send(callback.message, text, reply_markup=buy_key_kb(crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, order_id=existing_order_id, show_balance_button=show_balance_button), parse_mode='MarkdownV2')
+        await safe_edit_or_send(callback.message, text, reply_markup=kb, parse_mode='MarkdownV2', photo=prepayment_photo)
     except Exception:
         try:
             await callback.message.delete()
         except:
             pass
-        await callback.message.answer(text, reply_markup=buy_key_kb(crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, order_id=existing_order_id, show_balance_button=show_balance_button), parse_mode='MarkdownV2')
+        if prepayment_photo:
+            await callback.message.answer_photo(photo=prepayment_photo, caption=text, reply_markup=kb, parse_mode='MarkdownV2')
+        else:
+            await callback.message.answer(text, reply_markup=kb, parse_mode='MarkdownV2')
     await callback.answer()

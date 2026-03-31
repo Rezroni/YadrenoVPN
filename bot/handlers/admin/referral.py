@@ -32,6 +32,8 @@ from bot.keyboards.admin import (
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 
@@ -42,7 +44,9 @@ async def show_referral_menu(callback: CallbackQuery, state: FSMContext):
     enabled = is_referral_enabled()
     reward_type = get_referral_reward_type()
     levels = get_referral_levels()
-    conditions_text = get_referral_conditions_text()
+    from bot.utils.message_editor import get_message_data
+    conditions_data = get_message_data('referral_conditions_text', '')
+    conditions_text = conditions_data.get('text', '')
     
     status_emoji = "🟢" if enabled else "⚪"
     status_text = "включена" if enabled else "выключена"
@@ -289,73 +293,18 @@ async def referral_level_percent_input(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin_referral_conditions")
 async def referral_conditions_start(callback: CallbackQuery, state: FSMContext):
-    """Редактирование текста условий."""
+    """Редактирование текста условий через универсальный редактор."""
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from bot.utils.text import format_text_for_edit
+    from bot.handlers.admin.message_editor import show_message_editor
     
-    await state.set_state(AdminStates.referral_conditions_text)
-    
-    current_text = get_referral_conditions_text()
-    
-    await state.update_data(editing_message=callback.message)
-    
-    await safe_edit_or_send(callback.message, 
-        format_text_for_edit("Текст условий реферальной программы", current_text or "Не задано"),
-        reply_markup=referral_back_kb(),
-        parse_mode="MarkdownV2"
+    await show_message_editor(
+        callback.message, state,
+        key='referral_conditions_text',
+        back_callback='admin_referral',
+        allowed_types=['text', 'photo'],
     )
     await callback.answer()
 
-
-@router.message(AdminStates.referral_conditions_text, ~F.text.startswith('/'))
-async def referral_conditions_input(message: Message, state: FSMContext):
-    """Обработка ввода текста условий."""
-    if not is_admin(message.from_user.id):
-        return
-    
-    from bot.utils.text import get_message_text_for_storage, safe_edit_or_send, format_text_after_save
-    from bot.keyboards.admin import back_and_home_kb
-    
-    data = await state.get_data()
-    editing_message = data.get('editing_message')
-    
-    new_text = get_message_text_for_storage(message, 'markdown')
-    
-    if new_text.lower() in ['пусто', 'empty', '-', '']:
-        update_referral_setting('referral_conditions_text', '')
-        saved_text = "Не задано"
-    else:
-        update_referral_setting('referral_conditions_text', new_text)
-        saved_text = new_text
-    
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except:
-        pass
-    
-    await state.clear()
-    
-    # Редактируем сообщение с новым текстом
-    if editing_message:
-        try:
-            await safe_edit_or_send(editing_message, 
-                format_text_after_save("Текст условий реферальной программы", saved_text),
-                reply_markup=back_and_home_kb("admin_referral"),
-                parse_mode="MarkdownV2"
-            )
-        except:
-            await message.answer(
-                format_text_after_save("Текст условий реферальной программы", saved_text),
-                reply_markup=back_and_home_kb("admin_referral"),
-                parse_mode="MarkdownV2"
-            )
-    else:
-        await message.answer(
-            format_text_after_save("Текст условий реферальной программы", saved_text),
-            reply_markup=back_and_home_kb("admin_referral"),
-            parse_mode="MarkdownV2"
-        )

@@ -43,6 +43,8 @@ from bot.utils.text import escape_markdown_url, escape_md, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 

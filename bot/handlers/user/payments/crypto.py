@@ -8,6 +8,8 @@ from bot.utils.text import escape_md, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
+from bot.utils.text import safe_edit_or_send
+
 router = Router()
 
 @router.callback_query(F.data.startswith('renew_crypto_tariff:'))
