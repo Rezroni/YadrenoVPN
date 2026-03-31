@@ -9,7 +9,7 @@
 """
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 
 from config import ADMIN_IDS
@@ -286,7 +286,7 @@ async def process_crypto_url(message: Message, state: FSMContext):
         await message.answer(
             f"✅ Ссылка обновлена!\n[{url}]({safe_url})",
             parse_mode="Markdown",
-            disable_web_page_preview=True
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
         
         # Создаём фейковый callback для показа меню
@@ -321,7 +321,7 @@ async def process_crypto_url(message: Message, state: FSMContext):
             "🔑 *Ожидаю ввода секретного ключа:*\n"
             "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`.",
             reply_markup=crypto_setup_kb(2),
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
             parse_mode="Markdown"
         )
 
@@ -388,7 +388,7 @@ async def process_crypto_secret(message: Message, state: FSMContext):
             "Сохранить и включить крипто-платежи?",
             reply_markup=crypto_setup_confirm_kb(),
             parse_mode="Markdown",
-            disable_web_page_preview=True
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
 
 

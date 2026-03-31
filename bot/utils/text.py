@@ -1,4 +1,4 @@
-from aiogram.types import Message, InputMediaPhoto, InputMediaVideo, InputMediaDocument, InputMediaAnimation
+from aiogram.types import Message, InputMediaPhoto, InputMediaVideo, InputMediaDocument, InputMediaAnimation, LinkPreviewOptions
 from aiogram.exceptions import TelegramBadRequest
 from typing import Literal, Optional, Union
 import logging
@@ -63,6 +63,7 @@ async def safe_edit_or_send(
     reply_markup=None,
     parse_mode: Optional[str] = None,
     photo: Optional[Union[str, object]] = None,
+    disable_web_page_preview: Optional[bool] = None,
 ) -> Message:
     """Универсальная функция редактирования/отправки сообщения.
     
@@ -88,6 +89,10 @@ async def safe_edit_or_send(
     is_current_media = bool(message.photo or message.video or message.document or message.animation)
     want_media = photo is not None
     
+    link_preview = None
+    if disable_web_page_preview is not None:
+        link_preview = LinkPreviewOptions(is_disabled=disable_web_page_preview)
+    
     try:
         if want_media and is_current_media:
             # Медиа → Медиа: редактируем media + caption
@@ -109,7 +114,8 @@ async def safe_edit_or_send(
         elif not want_media and not is_current_media:
             # Текст → Текст: обычное редактирование
             return await message.edit_text(
-                text=text, reply_markup=reply_markup, parse_mode=parse_mode
+                text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                link_preview_options=link_preview
             )
             
         else:
@@ -119,7 +125,8 @@ async def safe_edit_or_send(
             except Exception:
                 pass
             return await message.answer(
-                text=text, reply_markup=reply_markup, parse_mode=parse_mode
+                text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                link_preview_options=link_preview
             )
             
     except TelegramBadRequest as e:
@@ -145,7 +152,8 @@ async def safe_edit_or_send(
                 )
             else:
                 return await message.answer(
-                    text=text, reply_markup=reply_markup, parse_mode=parse_mode
+                    text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                    link_preview_options=link_preview
                 )
         raise
 
