@@ -217,8 +217,72 @@ def sync_deleted_panel_confirm_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def sync_deleted_db_confirm_kb() -> InlineKeyboardMarkup:
-    """Клавиатура подтверждения очистки базы."""
+    """Клавиатура подтверждения запуска сканирования базы."""
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text='🗑️ Да, очистить базу', callback_data='admin_sync_deleted_db_confirm'))
+    builder.row(InlineKeyboardButton(text='🔍 Начать сканирование', callback_data='admin_sync_deleted_db_confirm'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
+    return builder.as_markup()
+
+def sync_deleted_db_report_kb(report: Dict[str, Any]) -> InlineKeyboardMarkup:
+    """Клавиатура отчёта сканирования БД — кнопка для каждой категории проблемных ключей."""
+    builder = InlineKeyboardBuilder()
+
+    # Категория 1: ключи без сервера
+    if report.get('null_total', 0) > 0:
+        builder.row(InlineKeyboardButton(
+            text=f"🗑️ Без сервера ({report['null_total']})",
+            callback_data='admin_sync_db_orphans_ask'
+        ))
+
+    # Категория 2: удалённые серверы
+    for sid, count in report.get('deleted_srv_keys', {}).items():
+        builder.row(InlineKeyboardButton(
+            text=f"👻 Удалённый сервер ID {sid} ({count})",
+            callback_data=f'admin_sync_db_gone_ask:{sid}'
+        ))
+
+    # Категории 3-5: по серверам
+    for r in report.get('server_results', []):
+        if r['status'] == 'reachable' and r.get('missing_count', 0) > 0:
+            builder.row(InlineKeyboardButton(
+                text=f"🗑️ {r['name']}: нет на панели ({r['missing_count']})",
+                callback_data=f'admin_sync_db_missing_ask:{r["server_id"]}'
+            ))
+        elif r['status'] == 'unreachable':
+            active_mark = "" if r['is_active'] else " ⏸️"
+            builder.row(InlineKeyboardButton(
+                text=f"⚠️ {r['name']}{active_mark}: недоступен ({r['total_keys']})",
+                callback_data=f'admin_sync_db_unreach_ask:{r["server_id"]}'
+            ))
+
+    builder.row(InlineKeyboardButton(text='🔄 Повторить', callback_data='admin_sync_deleted_db_confirm'))
+    builder.row(back_button('admin_sync_deleted_menu'), home_button())
+    return builder.as_markup()
+
+def sync_db_orphans_confirm_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления ключей без сервера."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🗑️ Да, удалить', callback_data='admin_sync_db_orphans_confirm'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
+    return builder.as_markup()
+
+def sync_db_gone_confirm_kb(server_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления ключей удалённого сервера."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🗑️ Да, удалить', callback_data=f'admin_sync_db_gone_confirm:{server_id}'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
+    return builder.as_markup()
+
+def sync_db_missing_confirm_kb(server_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления ключей, отсутствующих на панели."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🗑️ Да, удалить', callback_data=f'admin_sync_db_missing_confirm:{server_id}'))
+    builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
+    return builder.as_markup()
+
+def sync_db_unreach_confirm_kb(server_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления ключей недоступного сервера."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text='🚨 ДА, УДАЛИТЬ КЛЮЧИ', callback_data=f'admin_sync_db_unreach_confirm:{server_id}'))
     builder.row(InlineKeyboardButton(text='❌ Отмена', callback_data='admin_sync_deleted_menu'))
     return builder.as_markup()

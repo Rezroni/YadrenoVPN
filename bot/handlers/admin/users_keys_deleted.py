@@ -20,6 +20,7 @@ from database.requests import (
     delete_vpn_key,
     get_user_vpn_keys,
     get_active_servers,
+    get_all_servers,
     get_users_stats
 )
 from bot.services.vpn_api import get_client_from_server_data
@@ -164,6 +165,7 @@ async def on_sync_deleted_panel_confirm(callback: CallbackQuery):
 
     deleted_count = 0
     errors_count = 0
+    failed_servers = []
 
     for server in servers:
         try:
@@ -191,122 +193,502 @@ async def on_sync_deleted_panel_confirm(callback: CallbackQuery):
         except Exception as e:
             logger.error(f"Очистка панели: ошибка связи с {server['name']}: {e}")
             errors_count += 1
+            failed_servers.append({'id': server['id'], 'name': server['name']})
+
+    text_append = ""
+    if failed_servers:
+        failed_names = ", ".join([f"<b>{fs['name']}</b>" for fs in failed_servers])
+        text_append = f"\n\n⚠️ <b>Не удалось подключиться к серверам:</b> {failed_names}"
 
     await safe_edit_or_send(
         callback.message,
         f"✅ <b>Очистка панели завершена</b>\n\n"
         f"🗑 Удалено ключей-сирот: <b>{deleted_count}</b>\n"
-        f"❌ Ошибок: <b>{errors_count}</b>",
+        f"❌ Ошибок: <b>{errors_count}</b>{text_append}",
         reply_markup=sync_deleted_menu_kb()
     )
     await callback.answer()
 
 
-# ───────────── Очистка базы (удалить из БД ключи, которых нет на панели) ──────────
+# ───────────── Очистка базы (сканирование + покатегорийное удаление) ──────────
 
 @router.callback_query(F.data == 'admin_sync_deleted_db_ask')
 async def on_sync_deleted_db_ask(callback: CallbackQuery):
-    """Спрашиваем подтверждение на очистку БД."""
+    """Предлагаем запустить сканирование БД."""
     await safe_edit_or_send(
         callback.message,
-        "🗑️ <b>Очистка базы данных</b>\n\n"
-        "Вы собираетесь удалить из БД бота ключи, которых <b>уже не существует на их VPN-серверах</b> "
-        "(например, если кто-то удалил их вручную через веб-интерфейс).\n\n"
-        "Также будут удалены ключи-сироты: привязанные к несуществующему серверу.\n\n"
-        "Вы уверены?",
+        "🔍 <b>Сканирование базы данных</b>\n\n"
+        "Бот проверит все серверы и покажет отчёт:\n"
+        "• Ключи без привязки к серверу\n"
+        "• Ключи удалённых серверов\n"
+        "• Ключи, отсутствующие на панелях\n"
+        "• Ключи недоступных серверов\n\n"
+        "<b>Ничего не будет удалено автоматически</b> — вы сами выберете, что удалять.\n\n"
+        "Начать сканирование?",
         reply_markup=sync_deleted_db_confirm_kb()
     )
     await callback.answer()
 
 
 @router.callback_query(F.data == 'admin_sync_deleted_db_confirm')
-async def on_sync_deleted_db_confirm(callback: CallbackQuery):
-    """Удаление ключей из БД, которых нет на панели."""
+async def on_sync_deleted_db_scan(callback: CallbackQuery):
+    """Сканирование БД и серверов — показ отчёта-меню с категориями."""
     await safe_edit_or_send(
         callback.message,
-        "⏳ <b>Очистка базы данных: проверяю серверы...</b>\n\nПожалуйста, подождите."
+        "⏳ <b>Сканирование: проверяю серверы...</b>\n\nПожалуйста, подождите."
     )
 
-    servers = get_active_servers()
-    active_server_ids = {s['id'] for s in servers}
+    report = await _scan_db_keys()
+    text = _build_scan_report_text(report)
 
-    # Берём ВСЕ настроенные ключи из БД (с panel_email)
+    from bot.keyboards.admin_users import sync_deleted_db_report_kb
+    await safe_edit_or_send(
+        callback.message,
+        text,
+        reply_markup=sync_deleted_db_report_kb(report)
+    )
+    await callback.answer()
+
+
+# ──────────── Категория 1: ключи без сервера (server_id = NULL) ─────────────
+
+@router.callback_query(F.data == 'admin_sync_db_orphans_ask')
+async def on_sync_db_orphans_ask(callback: CallbackQuery):
+    """Подтверждение удаления ключей без сервера."""
     from database.connection import get_db
     with get_db() as conn:
-        rows = conn.execute("""
-            SELECT vk.id, vk.panel_email, vk.server_id
-            FROM vpn_keys vk
-            WHERE vk.panel_email IS NOT NULL
-        """).fetchall()
-    all_configured_keys = [dict(r) for r in rows]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM vpn_keys WHERE server_id IS NULL"
+        ).fetchone()[0]
+        unconfigured = conn.execute(
+            "SELECT COUNT(*) FROM vpn_keys WHERE server_id IS NULL AND panel_email IS NULL"
+        ).fetchone()[0]
 
-    deleted_count = 0
-    orphan_count = 0
-    errors_count = 0
-    ok_count = 0
+    if total == 0:
+        await callback.answer("✅ Ключей без сервера не найдено.", show_alert=True)
+        return
 
-    # 1. Сначала удаляем ключи-сироты (server_id = NULL или сервер неактивен/удалён)
-    for key in all_configured_keys:
-        sid = key.get('server_id')
-        if sid is None or sid not in active_server_ids:
-            try:
-                delete_vpn_key(key['id'])
-                orphan_count += 1
-                logger.info(f"Очистка БД: удалён ключ-сирота ID {key['id']} (server_id={sid})")
-            except Exception as e:
-                logger.error(f"Очистка БД: ошибка удаления ключа ID {key['id']}: {e}")
-                errors_count += 1
+    warning = ""
+    if unconfigured > 0:
+        warning = (
+            f"\n\n⚠️ <b>Внимание:</b> среди них <b>{unconfigured}</b> ненастроенных — "
+            f"это купленные, но ещё не активированные пользователями ключи! "
+            f"Удаление лишит их возможности настроить оплаченный ключ."
+        )
 
-    # 2. Проверяем ключи на активных серверах
-    for server in servers:
-        sid = server['id']
-        keys_on_server = [k for k in all_configured_keys
-                          if k.get('server_id') == sid]
-        if not keys_on_server:
-            continue
+    from bot.keyboards.admin_users import sync_db_orphans_confirm_kb
+    await safe_edit_or_send(
+        callback.message,
+        f"🗑️ <b>Удаление ключей без сервера</b>\n\n"
+        f"Будет удалено <b>{total}</b> ключей, у которых не указан сервер.{warning}\n\n"
+        f"Продолжить?",
+        reply_markup=sync_db_orphans_confirm_kb()
+    )
+    await callback.answer()
 
+
+@router.callback_query(F.data == 'admin_sync_db_orphans_confirm')
+async def on_sync_db_orphans_confirm(callback: CallbackQuery):
+    """Удаление ключей без сервера."""
+    from database.connection import get_db
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM vpn_keys WHERE server_id IS NULL"
+        ).fetchall()
+
+    deleted = 0
+    for row in rows:
         try:
-            client = get_client_from_server_data(server)
-            inbounds = await client.get_inbounds()
-
-            # Собираем email всех клиентов на сервере
-            panel_emails = set()
-            for inbound in inbounds:
-                settings = json.loads(inbound.get('settings', '{}'))
-                for cl in settings.get('clients', []):
-                    panel_emails.add(cl.get('email', '').lower())
-
-            # Сверяем
-            for key in keys_on_server:
-                key_email = (key.get('panel_email') or '').lower()
-                if key_email not in panel_emails:
-                    try:
-                        delete_vpn_key(key['id'])
-                        deleted_count += 1
-                        logger.info(f"Очистка БД: удалён ключ ID {key['id']} ({key_email}) — нет на панели")
-                    except Exception as e:
-                        logger.error(f"Очистка БД: ошибка удаления ключа ID {key['id']}: {e}")
-                        errors_count += 1
-                else:
-                    ok_count += 1
-
+            delete_vpn_key(row['id'])
+            deleted += 1
         except Exception as e:
-            logger.error(f"Очистка БД: ошибка связи с {server['name']}: {e}")
-            errors_count += 1
+            logger.error(f"Очистка БД (orphans): ошибка удаления ключа {row['id']}: {e}")
 
     await safe_edit_or_send(
         callback.message,
-        f"✅ <b>Очистка базы завершена</b>\n\n"
-        f"🗑 Удалено (нет на панели): <b>{deleted_count}</b>\n"
-        f"👻 Удалено сирот (нет сервера): <b>{orphan_count}</b>\n"
-        f"✅ На месте (найдены на серверах): <b>{ok_count}</b>\n"
-        f"❌ Ошибок: <b>{errors_count}</b>",
+        f"✅ <b>Удалено ключей без сервера:</b> <b>{deleted}</b>",
+        reply_markup=sync_deleted_menu_kb()
+    )
+    await callback.answer()
+
+
+# ──────── Категория 2: ключи удалённого сервера (нет в таблице servers) ─────────
+
+@router.callback_query(F.data.startswith('admin_sync_db_gone_ask:'))
+async def on_sync_db_gone_ask(callback: CallbackQuery):
+    """Подтверждение удаления ключей удалённого сервера."""
+    server_id = int(callback.data.split(':')[1])
+
+    from database.connection import get_db
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM vpn_keys WHERE server_id = ?", (server_id,)
+        ).fetchone()[0]
+
+    if count == 0:
+        await callback.answer("✅ Ключей не найдено.", show_alert=True)
+        return
+
+    from bot.keyboards.admin_users import sync_db_gone_confirm_kb
+    await safe_edit_or_send(
+        callback.message,
+        f"👻 <b>Удаление ключей удалённого сервера</b>\n\n"
+        f"Сервер с ID <b>{server_id}</b> больше не существует в базе данных бота.\n\n"
+        f"Будет удалено <b>{count}</b> ключей, привязанных к этому серверу.\n\n"
+        f"Продолжить?",
+        reply_markup=sync_db_gone_confirm_kb(server_id)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('admin_sync_db_gone_confirm:'))
+async def on_sync_db_gone_confirm(callback: CallbackQuery):
+    """Удаление ключей удалённого сервера."""
+    server_id = int(callback.data.split(':')[1])
+
+    from database.connection import get_db
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM vpn_keys WHERE server_id = ?", (server_id,)
+        ).fetchall()
+
+    deleted = 0
+    for row in rows:
+        try:
+            delete_vpn_key(row['id'])
+            deleted += 1
+        except Exception as e:
+            logger.error(f"Очистка БД (gone): ошибка удаления ключа {row['id']}: {e}")
+
+    await safe_edit_or_send(
+        callback.message,
+        f"✅ <b>Удалено ключей удалённого сервера ID {server_id}:</b> <b>{deleted}</b>",
+        reply_markup=sync_deleted_menu_kb()
+    )
+    await callback.answer()
+
+
+# ───────── Категория 3: ключи, отсутствующие на отвечающем сервере ──────────
+
+@router.callback_query(F.data.startswith('admin_sync_db_missing_ask:'))
+async def on_sync_db_missing_ask(callback: CallbackQuery):
+    """Подтверждение удаления ключей, отсутствующих на панели (пересканирование)."""
+    server_id = int(callback.data.split(':')[1])
+    from database.requests import get_server_by_id
+    server = get_server_by_id(server_id)
+
+    if not server:
+        await callback.answer("❌ Сервер не найден.", show_alert=True)
+        return
+
+    await safe_edit_or_send(
+        callback.message,
+        f"⏳ <b>Проверяю сервер {server['name']}...</b>"
+    )
+
+    try:
+        client = get_client_from_server_data(server)
+        inbounds = await client.get_inbounds()
+
+        panel_emails = set()
+        for inbound in inbounds:
+            settings = json.loads(inbound.get('settings', '{}'))
+            for cl in settings.get('clients', []):
+                panel_emails.add(cl.get('email', '').lower())
+
+        from database.connection import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, panel_email FROM vpn_keys WHERE server_id = ? AND panel_email IS NOT NULL",
+                (server_id,)
+            ).fetchall()
+
+        missing_count = sum(1 for r in rows if r['panel_email'].lower() not in panel_emails)
+
+        if missing_count == 0:
+            await safe_edit_or_send(
+                callback.message,
+                f"✅ <b>{server['name']}</b>: все ключи на месте!",
+                reply_markup=sync_deleted_menu_kb()
+            )
+            await callback.answer()
+            return
+
+        from bot.keyboards.admin_users import sync_db_missing_confirm_kb
+        await safe_edit_or_send(
+            callback.message,
+            f"🗑️ <b>Удаление ключей с {server['name']}</b>\n\n"
+            f"На сервере <b>{server['name']}</b> не найдено <b>{missing_count}</b> ключей.\n"
+            f"Они есть в БД бота, но отсутствуют на панели 3X-UI.\n\n"
+            f"Скорее всего они были удалены вручную через веб-интерфейс панели.\n\n"
+            f"Удалить эти записи из БД?",
+            reply_markup=sync_db_missing_confirm_kb(server_id)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при пересканировании {server['name']}: {e}")
+        await safe_edit_or_send(
+            callback.message,
+            f"❌ Не удалось подключиться к серверу <b>{server['name']}</b>.\n\n"
+            f"Возможно, сервер стал недоступен после сканирования.",
+            reply_markup=sync_deleted_menu_kb()
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('admin_sync_db_missing_confirm:'))
+async def on_sync_db_missing_confirm(callback: CallbackQuery):
+    """Удаление ключей, отсутствующих на панели (с повторной проверкой)."""
+    server_id = int(callback.data.split(':')[1])
+    from database.requests import get_server_by_id
+    server = get_server_by_id(server_id)
+
+    if not server:
+        await callback.answer("❌ Сервер не найден.", show_alert=True)
+        return
+
+    await safe_edit_or_send(
+        callback.message,
+        f"⏳ <b>Удаляю ключи с {server['name']}...</b>"
+    )
+
+    try:
+        client = get_client_from_server_data(server)
+        inbounds = await client.get_inbounds()
+
+        panel_emails = set()
+        for inbound in inbounds:
+            settings = json.loads(inbound.get('settings', '{}'))
+            for cl in settings.get('clients', []):
+                panel_emails.add(cl.get('email', '').lower())
+
+        from database.connection import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, panel_email FROM vpn_keys WHERE server_id = ? AND panel_email IS NOT NULL",
+                (server_id,)
+            ).fetchall()
+
+        deleted = 0
+        for row in rows:
+            if row['panel_email'].lower() not in panel_emails:
+                try:
+                    delete_vpn_key(row['id'])
+                    deleted += 1
+                    logger.info(f"Очистка БД: удалён {row['panel_email']} — нет на панели {server['name']}")
+                except Exception as e:
+                    logger.error(f"Очистка БД (missing): ошибка удаления ключа {row['id']}: {e}")
+
+        await safe_edit_or_send(
+            callback.message,
+            f"✅ <b>Операция завершена</b>\n\n"
+            f"🗑 Удалено с {server['name']}: <b>{deleted}</b>",
+            reply_markup=sync_deleted_menu_kb()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при удалении с {server['name']}: {e}")
+        await safe_edit_or_send(
+            callback.message,
+            f"❌ Не удалось подключиться к серверу <b>{server['name']}</b>.",
+            reply_markup=sync_deleted_menu_kb()
+        )
+    await callback.answer()
+
+
+# ────────── Категория 4: ключи недоступного сервера (force delete) ──────────
+
+@router.callback_query(F.data.startswith('admin_sync_db_unreach_ask:'))
+async def on_sync_db_unreach_ask(callback: CallbackQuery):
+    """Подтверждение принудительного удаления ключей недоступного сервера."""
+    server_id = int(callback.data.split(':')[1])
+    all_servers = get_all_servers()
+    server_name = next((s['name'] for s in all_servers if s['id'] == server_id), f"ID {server_id}")
+
+    from database.connection import get_db
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM vpn_keys WHERE server_id = ?", (server_id,)
+        ).fetchone()[0]
+
+    if count == 0:
+        await callback.answer("✅ Ключей не найдено.", show_alert=True)
+        return
+
+    from bot.keyboards.admin_users import sync_db_unreach_confirm_kb
+    await safe_edit_or_send(
+        callback.message,
+        f"⚠️ <b>Внимание!</b>\n\n"
+        f"Сервер <b>{server_name}</b> недоступен.\n\n"
+        f"Вы действительно хотите удалить <b>ВСЕ {count}</b> ключей в базе данных, "
+        f"которые привязаны к этому серверу?\n\n"
+        f"🚨 <b>Чем это грозит:</b> Если сервер просто временно упал, перезагружается "
+        f"или заблокирован РКН, вы безвозвратно удалите абсолютно рабочие ключи пользователей! "
+        f"Они потеряют доступ к конфигурациям в боте и подписка может сломаться.",
+        reply_markup=sync_db_unreach_confirm_kb(server_id)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('admin_sync_db_unreach_confirm:'))
+async def on_sync_db_unreach_confirm(callback: CallbackQuery):
+    """Принудительное удаление ключей недоступного сервера."""
+    server_id = int(callback.data.split(':')[1])
+
+    await safe_edit_or_send(
+        callback.message,
+        "⏳ <b>Удаление ключей...</b>\n\nПожалуйста, подождите."
+    )
+
+    from database.connection import get_db
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM vpn_keys WHERE server_id = ?", (server_id,)
+        ).fetchall()
+
+    deleted = 0
+    for row in rows:
+        try:
+            delete_vpn_key(row['id'])
+            deleted += 1
+        except Exception as e:
+            logger.error(f"Очистка БД (unreach): ошибка удаления ключа {row['id']}: {e}")
+
+    await safe_edit_or_send(
+        callback.message,
+        f"✅ <b>Операция завершена</b>\n\n"
+        f"🗑 Принудительно удалено ключей: <b>{deleted}</b>",
         reply_markup=sync_deleted_menu_kb()
     )
     await callback.answer()
 
 
 # ──────────────────────── Утилиты ────────────────────────
+
+async def _scan_db_keys() -> dict:
+    """
+    Сканирует все ключи в БД и серверы, классифицирует по категориям.
+    
+    Returns:
+        Словарь с результатами сканирования по категориям
+    """
+    all_servers = get_all_servers()
+    all_server_ids = {s['id'] for s in all_servers}
+
+    from database.connection import get_db
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, panel_email, server_id FROM vpn_keys"
+        ).fetchall()
+    all_keys = [dict(r) for r in rows]
+
+    # Категория 1: server_id = NULL
+    null_server_keys = [k for k in all_keys if k.get('server_id') is None]
+    null_total = len(null_server_keys)
+    null_unconfigured = len([k for k in null_server_keys if not k.get('panel_email')])
+
+    # Категория 2: server_id указывает на несуществующий сервер
+    deleted_srv_keys = {}
+    for key in all_keys:
+        sid = key.get('server_id')
+        if sid is not None and sid not in all_server_ids:
+            if sid not in deleted_srv_keys:
+                deleted_srv_keys[sid] = 0
+            deleted_srv_keys[sid] += 1
+
+    # Категории 3-5: результаты по серверам
+    server_results = []
+    for server in all_servers:
+        sid = server['id']
+        keys_on_server = [k for k in all_keys
+                          if k.get('server_id') == sid and k.get('panel_email')]
+        if not keys_on_server:
+            continue
+
+        result = {
+            'server_id': sid,
+            'name': server['name'],
+            'is_active': bool(server.get('is_active')),
+            'total_keys': len(keys_on_server),
+        }
+
+        try:
+            client = get_client_from_server_data(server)
+            inbounds = await client.get_inbounds()
+
+            panel_emails = set()
+            for inbound in inbounds:
+                settings = json.loads(inbound.get('settings', '{}'))
+                for cl in settings.get('clients', []):
+                    panel_emails.add(cl.get('email', '').lower())
+
+            missing = 0
+            ok = 0
+            for key in keys_on_server:
+                email = (key.get('panel_email') or '').lower()
+                if email not in panel_emails:
+                    missing += 1
+                else:
+                    ok += 1
+
+            result['status'] = 'reachable'
+            result['missing_count'] = missing
+            result['ok_count'] = ok
+        except Exception as e:
+            logger.error(f"Сканирование: ошибка связи с {server['name']}: {e}")
+            result['status'] = 'unreachable'
+
+        server_results.append(result)
+
+    return {
+        'null_total': null_total,
+        'null_unconfigured': null_unconfigured,
+        'deleted_srv_keys': deleted_srv_keys,
+        'server_results': server_results,
+    }
+
+
+def _build_scan_report_text(report: dict) -> str:
+    """Формирует текст отчёта из результатов сканирования."""
+    lines = ["🔍 <b>Результаты сканирования</b>\n"]
+    has_issues = False
+
+    # Категория 1: без сервера
+    if report['null_total'] > 0:
+        has_issues = True
+        text = f"📋 Ключи без сервера: <b>{report['null_total']}</b>"
+        if report['null_unconfigured'] > 0:
+            text += f"\n  ⚠️ Из них <b>{report['null_unconfigured']}</b> — ненастроенные (купленные, не активированные)"
+        lines.append(text)
+
+    # Категория 2: удалённые серверы
+    for sid, count in report['deleted_srv_keys'].items():
+        has_issues = True
+        lines.append(f"\n👻 Удалённый сервер (ID {sid}): <b>{count}</b> ключей")
+
+    # Категории 3-5: по серверам
+    for r in report['server_results']:
+        if r['status'] == 'reachable':
+            if r.get('missing_count', 0) > 0:
+                has_issues = True
+                lines.append(
+                    f"\n🟢 <b>{r['name']}</b>: <b>{r['missing_count']}</b> не найдено на панели, "
+                    f"{r['ok_count']} ОК"
+                )
+            else:
+                lines.append(f"\n✅ <b>{r['name']}</b>: все {r['ok_count']} ключей на месте")
+        elif r['status'] == 'unreachable':
+            has_issues = True
+            active_text = "" if r['is_active'] else " (деактивирован)"
+            emoji = "🔴" if r['is_active'] else "⏸️"
+            lines.append(
+                f"\n{emoji} <b>{r['name']}</b>{active_text}: не отвечает "
+                f"({r['total_keys']} ключей)"
+            )
+
+    if not has_issues:
+        lines.append("\n✅ Всё чисто — удалять нечего!")
+
+    return "\n".join(lines)
+
 
 def _build_server_data(key: dict) -> dict:
     """Формирует server_data из данных ключа для get_client_from_server_data."""
