@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database.requests import get_users_stats, get_all_users_paginated, get_user_by_telegram_id, toggle_user_ban, get_user_vpn_keys, get_user_payments_stats, get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin, get_active_servers, get_all_tariffs, get_user_balance, get_user_referral_coefficient, add_to_balance, deduct_from_balance, set_user_referral_coefficient
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user_ban_confirm_kb, key_view_kb, add_key_server_kb, add_key_inbound_kb, add_key_step_kb, add_key_confirm_kb, users_input_cancel_kb, key_action_cancel_kb, back_and_home_kb, home_only_kb
 from bot.services.vpn_api import get_client_from_server_data, VPNAPIError, format_traffic
@@ -38,12 +38,12 @@ async def _show_user_view(message: Message, state: FSMContext, telegram_id: int)
     """Показывает карточку пользователя (новое сообщение)."""
     user = get_user_by_telegram_id(telegram_id)
     if not user:
-        await message.answer(f'❌ Пользователь с ID {telegram_id} не найден', reply_markup=home_only_kb())
+        await safe_edit_or_send(message, f'❌ Пользователь с ID {telegram_id} не найден', reply_markup=home_only_kb(), force_new=True)
         return
     await state.set_state(AdminStates.user_view)
     await state.update_data(current_user_telegram_id=telegram_id)
     (text, keyboard) = _format_user_card(user)
-    await message.answer(text, reply_markup=keyboard, parse_mode='Markdown')
+    await safe_edit_or_send(message, text, reply_markup=keyboard, force_new=True)
 
 async def _show_user_view_edit(callback: CallbackQuery, state: FSMContext, telegram_id: int):
     """Показывает карточку пользователя (редактирование сообщения)."""
@@ -54,7 +54,7 @@ async def _show_user_view_edit(callback: CallbackQuery, state: FSMContext, teleg
     await state.set_state(AdminStates.user_view)
     await state.update_data(current_user_telegram_id=telegram_id)
     (text, keyboard) = _format_user_card(user)
-    await safe_edit_or_send(callback.message, text, reply_markup=keyboard, parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=keyboard)
     await callback.answer()
 
 def _format_user_card(user: dict) -> tuple[str, any]:
@@ -69,15 +69,15 @@ def _format_user_card(user: dict) -> tuple[str, any]:
     
     lines = []
     if is_banned:
-        lines.append('🚫 *ПОЛЬЗОВАТЕЛЬ ЗАБАНЕН*')
+        lines.append('🚫 <b>ПОЛЬЗОВАТЕЛЬ ЗАБАНЕН</b>')
         lines.append('')
         
     if username:
-        lines.append(f'👤 Username: @{escape_md(username)}')
+        lines.append(f'👤 Username: @{escape_html(username)}')
     else:
         lines.append('👤 Username: _не указан_')
         
-    lines.append(f'📱 Telegram ID: `{telegram_id}`')
+    lines.append(f'📱 Telegram ID: <code>{telegram_id}</code>')
     
     unique_emails = set()
     for key in vpn_keys:
@@ -85,23 +85,23 @@ def _format_user_card(user: dict) -> tuple[str, any]:
             unique_emails.add(key['panel_email'])
             
     if unique_emails:
-        emails_str = ', '.join(f'`{escape_md(e)}`' for e in unique_emails)
+        emails_str = ', '.join(f'<code>{escape_html(e)}</code>' for e in unique_emails)
     else:
         if username:
             fallback = f"user_{username}"
         else:
             fallback = f"user_{telegram_id}"
-        emails_str = f'`{escape_md(fallback)}`'
+        emails_str = f'<code>{escape_html(fallback)}</code>'
         
     lines.append(f'📧 E-mail в панели: {emails_str}')
     lines.append(f'📅 Зарегистрирован: {created_at}')
     
     balance_rub = balance_cents / 100
-    lines.append(f'💰 Баланс: *{balance_rub:.2f} ₽*')
-    lines.append(f'📊 Реферальный коэффициент: *{referral_coefficient}x*')
+    lines.append(f'💰 Баланс: <b>{balance_rub:.2f} ₽</b>')
+    lines.append(f'📊 Реферальный коэффициент: <b>{referral_coefficient}x</b>')
     lines.append('')
     if vpn_keys:
-        lines.append(f'🔑 *VPN-ключи ({len(vpn_keys)}):*')
+        lines.append(f'🔑 <b>VPN-ключи ({len(vpn_keys)}):</b>')
         for key in vpn_keys:
             if key.get('custom_name'):
                 key_name = key['custom_name']
@@ -120,12 +120,12 @@ def _format_user_card(user: dict) -> tuple[str, any]:
                     status = '🟢'
             except:
                 status = '🔑'
-            lines.append(f'  {status} `{key_name}` (до {expires})')
+            lines.append(f'  {status} <code>{key_name}</code> (до {expires})')
     else:
         lines.append('🔑 _VPN-ключей нет_')
     payment_stats = get_user_payments_stats(user['id'])
     lines.append('')
-    lines.append('💳 *Оплаты:*')
+    lines.append('💳 <b>Оплаты:</b>')
     total_payments = payment_stats.get('total_payments', 0)
     if total_payments > 0:
         total_usd = payment_stats.get('total_amount_cents', 0) / 100
@@ -164,8 +164,8 @@ async def request_ban_confirmation(callback: CallbackQuery, state: FSMContext):
         action = 'разблокировать'
     else:
         action = 'заблокировать'
-    text = f'⚠️ *Подтверждение*\n\nВы уверены, что хотите *{action}* пользователя `{format_user_display(user)}`?'
-    await safe_edit_or_send(callback.message, text, reply_markup=user_ban_confirm_kb(telegram_id, is_banned), parse_mode='Markdown')
+    text = f'⚠️ <b>Подтверждение</b>\n\nВы уверены, что хотите <b>{action}</b> пользователя <code>{format_user_display(user)}</code>?'
+    await safe_edit_or_send(callback.message, text, reply_markup=user_ban_confirm_kb(telegram_id, is_banned))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('admin_user_ban_confirm:'))
@@ -199,7 +199,7 @@ async def start_coefficient_edit(callback: CallbackQuery, state: FSMContext):
     current_coefficient = get_user_referral_coefficient(user['id'])
     await state.set_state(AdminStates.waiting_coefficient)
     await state.update_data(coefficient_user_telegram_id=telegram_id, coefficient_edit_message_id=callback.message.message_id)
-    await safe_edit_or_send(callback.message, f'📊 *Редактирование реферального коэффициента*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n\nТекущий реферальный коэффициент: *{current_coefficient}x*\n\nВведите новый реферальный коэффициент (0.0 - 10.0):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'📊 <b>Редактирование реферального коэффициента</b>\n\n👤 {format_user_display(user)}\n📱 ID: <code>{telegram_id}</code>\n\nТекущий реферальный коэффициент: <b>{current_coefficient}x</b>\n\nВведите новый реферальный коэффициент (0.0 - 10.0):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'))
     await callback.answer()
 
 @router.message(AdminStates.waiting_coefficient, F.text, ~F.text.startswith('/'))
@@ -227,7 +227,7 @@ async def process_coefficient_input(message: Message, state: FSMContext):
     await message.delete()
     if edit_message_id:
         try:
-            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=edit_message_id, text=f'📊 *Реферальный коэффициент обновлён*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n\nНовый реферальный коэффициент: *{coefficient}x*', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=edit_message_id, text=f'📊 <b>Реферальный коэффициент обновлён</b>\n\n👤 {format_user_display(user)}\n📱 ID: <code>{telegram_id}</code>\n\nНовый реферальный коэффициент: <b>{coefficient}x</b>', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='HTML')
         except Exception:
             pass
     await state.clear()
@@ -247,7 +247,7 @@ async def start_balance_add(callback: CallbackQuery, state: FSMContext):
     balance_rub = current_balance / 100
     await state.set_state(AdminStates.waiting_balance_amount)
     await state.update_data(balance_user_telegram_id=telegram_id, balance_operation='add')
-    await safe_edit_or_send(callback.message, f'💰 *Пополнение баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму пополнения в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'💰 <b>Пополнение баланса</b>\n\n👤 {format_user_display(user)}\n📱 ID: <code>{telegram_id}</code>\n💼 Текущий баланс: <b>{balance_rub:.2f} ₽</b>\n\nВведите сумму пополнения в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'))
     await callback.answer()
 
 @router.callback_query(F.data.regexp('^admin_user_balance_deduct:(\\d+)$'))
@@ -265,7 +265,7 @@ async def start_balance_deduct(callback: CallbackQuery, state: FSMContext):
     balance_rub = current_balance / 100
     await state.set_state(AdminStates.waiting_balance_amount)
     await state.update_data(balance_user_telegram_id=telegram_id, balance_operation='deduct')
-    await safe_edit_or_send(callback.message, f'💸 *Списание баланса*\n\n👤 {format_user_display(user)}\n📱 ID: `{telegram_id}`\n💼 Текущий баланс: *{balance_rub:.2f} ₽*\n\nВведите сумму списания в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f'💸 <b>Списание баланса</b>\n\n👤 {format_user_display(user)}\n📱 ID: <code>{telegram_id}</code>\n💼 Текущий баланс: <b>{balance_rub:.2f} ₽</b>\n\nВведите сумму списания в рублях (например: 100 или 50.5):', reply_markup=back_and_home_kb(f'admin_user_view:{telegram_id}'))
     await callback.answer()
 
 @router.message(AdminStates.waiting_balance_amount, F.text, ~F.text.startswith('/'))
@@ -281,38 +281,38 @@ async def process_balance_amount(message: Message, state: FSMContext):
         if amount_rub <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer('❌ Введите положительное число (например: 100 или 50.5)')
+        await safe_edit_or_send(message, '❌ Введите положительное число (например: 100 или 50.5)')
         return
     amount_cents = int(round(amount_rub * 100))
     data = await state.get_data()
     telegram_id = data.get('balance_user_telegram_id')
     operation = data.get('balance_operation')
     if not telegram_id:
-        await message.answer('❌ Ошибка: потерян контекст операции')
+        await safe_edit_or_send(message, '❌ Ошибка: потерян контекст операции')
         return
     user = get_user_by_telegram_id(telegram_id)
     if not user:
-        await message.answer('❌ Пользователь не найден')
+        await safe_edit_or_send(message, '❌ Пользователь не найден')
         return
     user_id = user['id']
     current_balance = get_user_balance(user_id)
     if operation == 'deduct':
         if amount_cents > current_balance:
             balance_rub = current_balance / 100
-            await message.answer(f'❌ Недостаточно средств на балансе.\nТекущий баланс: {balance_rub:.2f} ₽\nПопытка списать: {amount_rub:.2f} ₽')
+            await safe_edit_or_send(message, f'❌ Недостаточно средств на балансе.\nТекущий баланс: {balance_rub:.2f} ₽\nПопытка списать: {amount_rub:.2f} ₽')
             return
         async with user_locks[user_id]:
             deduct_from_balance(user_id, amount_cents)
         new_balance = get_user_balance(user_id)
         new_balance_rub = new_balance / 100
-        await message.answer(f'✅ Баланс списан\n\nСписано: {amount_rub:.2f} ₽\nНовый баланс: {new_balance_rub:.2f} ₽')
+        await safe_edit_or_send(message, f'✅ Баланс списан\n\nСписано: {amount_rub:.2f} ₽\nНовый баланс: {new_balance_rub:.2f} ₽')
         logger.info(f'Админ {message.from_user.id} списал {amount_cents} коп с баланса user {user_id}')
     else:
         async with user_locks[user_id]:
             add_to_balance(user_id, amount_cents)
         new_balance = get_user_balance(user_id)
         new_balance_rub = new_balance / 100
-        await message.answer(f'✅ Баланс пополнен\n\nПополнено: {amount_rub:.2f} ₽\nНовый баланс: {new_balance_rub:.2f} ₽')
+        await safe_edit_or_send(message, f'✅ Баланс пополнен\n\nПополнено: {amount_rub:.2f} ₽\nНовый баланс: {new_balance_rub:.2f} ₽')
         logger.info(f'Админ {message.from_user.id} пополнил баланс user {user_id} на {amount_cents} коп')
     try:
         await message.delete()

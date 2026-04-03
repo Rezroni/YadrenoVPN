@@ -99,8 +99,7 @@ async def show_editor_help(callback: CallbackQuery, state: FSMContext):
     result = await safe_edit_or_send(
         callback.message,
         help_text,
-        reply_markup=editor_help_kb(),
-        parse_mode='Markdown',
+        reply_markup=editor_help_kb()
     )
     
     # Обновляем сохранённое сообщение
@@ -162,7 +161,7 @@ async def handle_editor_input(message: Message, state: FSMContext):
     
     if not key:
         await state.clear()
-        await message.answer("❌ Ошибка состояния.")
+        await safe_edit_or_send(message, "❌ Ошибка состояния.")
         return
     
     # Проверяем тип сообщения

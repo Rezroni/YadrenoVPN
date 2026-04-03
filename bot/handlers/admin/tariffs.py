@@ -86,12 +86,12 @@ async def show_tariffs_list(callback: CallbackQuery, state: FSMContext):
     
     if not tariffs:
         text = (
-            "📋 *Тарифы*\n\n"
+            "📋 <b>Тарифы</b>\n\n"
             "Тарифов пока нет.\n"
             "Нажмите «➕ Добавить тариф» чтобы создать первый!"
         )
     else:
-        lines = ["📋 *Тарифы*\n"]
+        lines = ["📋 <b>Тарифы</b>\n"]
         
         for tariff in tariffs:
             status = "🟢" if tariff['is_active'] else "🔴"
@@ -102,7 +102,7 @@ async def show_tariffs_list(callback: CallbackQuery, state: FSMContext):
             traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлим"
             
             lines.append(
-                f"{status} *{tariff['name']}* — "
+                f"{status} <b>{tariff['name']}</b> — "
                 f"${price_str} / ⭐ {tariff['price_stars']} / ₽ {tariff.get('price_rub', 0)} / "
                 f"{tariff['duration_days']} дн. / {traffic_text}"
             )
@@ -114,8 +114,7 @@ async def show_tariffs_list(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=tariffs_list_kb(tariffs),
-        parse_mode="Markdown"
+        reply_markup=tariffs_list_kb(tariffs)
     )
     await callback.answer()
 
@@ -135,37 +134,36 @@ async def render_tariff_view(message: Message, tariff_id: int, state: FSMContext
     price_str = f"{price_usd:g}".replace('.', ',')
     
     lines = [
-        f"📋 *{tariff['name']}*\n",
-        f"💰 Цена (USDT): `${price_str}`",
-        f"⭐ Цена (Stars): `{tariff['price_stars']}`",
-        f"💳 Цена (₽): `{tariff.get('price_rub', 0)}`",
-        f"📅 Длительность: `{tariff['duration_days']} дней`",
+        f"📋 <b>{tariff['name']}</b>\n",
+        f"💰 Цена (USDT): <code>${price_str}</code>",
+        f"⭐ Цена (Stars): <code>{tariff['price_stars']}</code>",
+        f"💳 Цена (₽): <code>{tariff.get('price_rub', 0)}</code>",
+        f"📅 Длительность: <code>{tariff['duration_days']} дней</code>",
     ]
     
     # Лимит трафика
     traffic_gb = tariff.get('traffic_limit_gb', 0)
     traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлимит"
-    lines.append(f"📦 Лимит трафика: `{traffic_text}`")
+    lines.append(f"📦 Лимит трафика: <code>{traffic_text}</code>")
     
     if tariff.get('external_id'):
-        lines.append(f"🔗 ID тарифа (Ya.Seller): `{tariff['external_id']}`")
+        lines.append(f"🔗 ID тарифа (Ya.Seller): <code>{tariff['external_id']}</code>")
     
     # Группа (показываем только если > 1 группы)
     groups_count = get_groups_count()
     if groups_count > 1:
         group = get_group_by_id(tariff.get('group_id', 1))
         group_name = group['name'] if group else 'Основная'
-        lines.append(f"📂 Группа: `{group_name}`")
+        lines.append(f"📂 Группа: <code>{group_name}</code>")
     
     lines.extend([
-        f"📊 Порядок: `{tariff.get('display_order', 0)}`",
+        f"📊 Порядок: <code>{tariff.get('display_order', 0)}</code>",
         f"\n{status_emoji}",
     ])
     
     await safe_edit_or_send(message, 
         "\n".join(lines),
-        reply_markup=tariff_view_kb(tariff_id, tariff['is_active'], groups_count > 1),
-        parse_mode="Markdown"
+        reply_markup=tariff_view_kb(tariff_id, tariff['is_active'], groups_count > 1)
     )
 
 
@@ -272,19 +270,19 @@ def get_add_step_text(step: int, data: dict, include_crypto: bool, crypto_mode: 
     
     param = params[step - 1]
     
-    lines = [f"📝 *Добавление тарифа ({step}/{total})*\n"]
+    lines = [f"📝 <b>Добавление тарифа ({step}/{total})</b>\n"]
     
     # Показываем уже введённые данные
     for i in range(step - 1):
         p = params[i]
         value = data.get(p['key'], '—')
         display = format_tariff_value(p, value)
-        lines.append(f"✅ {p['label']}: `{display}`")
+        lines.append(f"✅ {p['label']}: <code>{display}</code>")
     
     if step > 1:
         lines.append("")
     
-    lines.append(f"Введите *{param['label'].lower()}*:")
+    lines.append(f"Введите <b>{param['label'].lower()}</b>:")
     lines.append(f"_({param['hint']})_")
     
     # Если есть дополнительная справка
@@ -312,10 +310,9 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
         await state.update_data(tariff_data={}, include_crypto=include_crypto, crypto_mode=crypto_mode)
         
         await safe_edit_or_send(callback.message, 
-            "📝 *Добавление тарифа*\n\n"
+            "📝 <b>Добавление тарифа</b>\n\n"
             "Выберите группу для нового тарифа:",
-            reply_markup=group_select_kb(groups, "tariff_group_select", "admin_tariffs"),
-            parse_mode="Markdown"
+            reply_markup=group_select_kb(groups, "tariff_group_select", "admin_tariffs")
         )
         await callback.answer()
         return
@@ -332,8 +329,7 @@ async def start_add_tariff(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=add_tariff_step_kb(1, total),
-        parse_mode="Markdown"
+        reply_markup=add_tariff_step_kb(1, total)
     )
     await callback.answer()
 
@@ -357,12 +353,11 @@ async def tariff_group_selected(callback: CallbackQuery, state: FSMContext):
     group = get_group_by_id(group_id)
     group_name = group['name'] if group else 'Основная'
     
-    text = f"📂 Группа: *{group_name}*\n\n" + get_add_step_text(1, {}, include_crypto, crypto_mode)
+    text = f"📂 Группа: <b>{group_name}</b>\n\n" + get_add_step_text(1, {}, include_crypto, crypto_mode)
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=add_tariff_step_kb(1, total),
-        parse_mode="Markdown"
+        reply_markup=add_tariff_step_kb(1, total)
     )
     await callback.answer()
 
@@ -398,8 +393,7 @@ async def add_tariff_back(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=add_tariff_step_kb(new_step, total),
-        parse_mode="Markdown"
+        reply_markup=add_tariff_step_kb(new_step, total)
     )
     await callback.answer()
 
@@ -426,9 +420,8 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
     
     # Валидация
     if not param['validate'](value):
-        await message.answer(
-            f"❌ {param['error']}\n\nПопробуйте ещё раз:",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ {param['error']}\n\nПопробуйте ещё раз:"
         )
         return
     
@@ -455,10 +448,10 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
         
         text = get_add_step_text(new_step, tariff_data, include_crypto, crypto_mode)
         
-        await message.answer(
+        await safe_edit_or_send(message,
             text,
             reply_markup=add_tariff_step_kb(new_step, total),
-            parse_mode="Markdown"
+            force_new=True
         )
     else:
         # Все данные введены — показываем подтверждение
@@ -468,28 +461,28 @@ async def process_add_tariff_step(message: Message, state: FSMContext):
         price_str = f"{price_usd:g}".replace('.', ',')
         
         lines = [
-            "✅ *Все данные введены!*\n",
-            f"📌 Название: `{tariff_data['name']}`",
-            f"💰 Цена (USDT): `${price_str}`",
-            f"⭐ Цена (Stars): `{tariff_data['price_stars']}`",
-            f"💳 Цена (₽): `{tariff_data.get('price_rub', 0)}`",
-            f"📅 Длительность: `{tariff_data['duration_days']} дней`",
+            "✅ <b>Все данные введены!</b>\n",
+            f"📌 Название: <code>{tariff_data['name']}</code>",
+            f"💰 Цена (USDT): <code>${price_str}</code>",
+            f"⭐ Цена (Stars): <code>{tariff_data['price_stars']}</code>",
+            f"💳 Цена (₽): <code>{tariff_data.get('price_rub', 0)}</code>",
+            f"📅 Длительность: <code>{tariff_data['duration_days']} дней</code>",
         ]
         
         # Лимит трафика
         traffic_gb = tariff_data.get('traffic_limit_gb', 0)
         traffic_text = f"{traffic_gb} ГБ" if traffic_gb > 0 else "Безлимит"
-        lines.append(f"📦 Лимит трафика: `{traffic_text}`")
+        lines.append(f"📦 Лимит трафика: <code>{traffic_text}</code>")
         
         if tariff_data.get('external_id'):
-            lines.append(f"🔗 ID тарифа: `{tariff_data['external_id']}`")
+            lines.append(f"🔗 ID тарифа: <code>{tariff_data['external_id']}</code>")
         
         lines.append("\nСохранить тариф?")
         
-        await message.answer(
+        await safe_edit_or_send(message,
             "\n".join(lines),
             reply_markup=add_tariff_confirm_kb(),
-            parse_mode="Markdown"
+            force_new=True
         )
 
 
@@ -554,9 +547,8 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
         )
         
         await safe_edit_or_send(callback.message, 
-            f"✅ *Тариф успешно добавлен!*\n\n"
-            f"📋 {tariff_data['name']}",
-            parse_mode="Markdown"
+            f"✅ <b>Тариф успешно добавлен!</b>\n\n"
+            f"📋 {tariff_data['name']}"
         )
         
         await callback.answer("✅ Тариф добавлен!")
@@ -568,9 +560,8 @@ async def add_tariff_save(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Ошибка добавления тарифа: {e}")
         await safe_edit_or_send(callback.message, 
-            f"❌ *Ошибка сохранения*\n\n`{e}`",
-            reply_markup=back_and_home_kb("admin_tariffs"),
-            parse_mode="Markdown"
+            f"❌ <b>Ошибка сохранения</b>\n\n<code>{e}</code>",
+            reply_markup=back_and_home_kb("admin_tariffs")
         )
         await callback.answer("❌ Ошибка", show_alert=True)
 
@@ -589,9 +580,9 @@ def get_edit_tariff_text(tariff: dict, current_param: int, include_crypto: bool,
     display_value = format_tariff_value(param, current_value)
     
     lines = [
-        f"✏️ *Редактирование: {tariff['name']}* ({current_param + 1}/{total})\n",
-        f"📌 Параметр: *{param['label']}*",
-        f"📝 Текущее значение: `{display_value}`\n",
+        f"✏️ <b>Редактирование: {tariff['name']}</b> ({current_param + 1}/{total})\n",
+        f"📌 Параметр: <b>{param['label']}</b>",
+        f"📝 Текущее значение: <code>{display_value}</code>\n",
         f"Введите новое значение или используйте кнопки навигации:",
         f"_({param['hint']})_"
     ]
@@ -627,8 +618,7 @@ async def start_edit_tariff(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=edit_tariff_kb(0, total),
-        parse_mode="Markdown"
+        reply_markup=edit_tariff_kb(0, total)
     )
     await callback.answer()
 
@@ -659,8 +649,7 @@ async def edit_tariff_prev(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=edit_tariff_kb(new_param, total),
-        parse_mode="Markdown"
+        reply_markup=edit_tariff_kb(new_param, total)
     )
     await callback.answer()
 
@@ -691,8 +680,7 @@ async def edit_tariff_next(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=edit_tariff_kb(new_param, total),
-        parse_mode="Markdown"
+        reply_markup=edit_tariff_kb(new_param, total)
     )
     await callback.answer()
 
@@ -713,9 +701,8 @@ async def edit_tariff_value(message: Message, state: FSMContext):
     
     # Валидация
     if not param['validate'](value):
-        await message.answer(
-            f"❌ {param['error']}",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ {param['error']}"
         )
         return
     
@@ -727,7 +714,7 @@ async def edit_tariff_value(message: Message, state: FSMContext):
     success = update_tariff_field(tariff_id, param['key'], value)
     
     if not success:
-        await message.answer("❌ Ошибка сохранения")
+        await safe_edit_or_send(message, "❌ Ошибка сохранения")
         return
     
     # Удаляем сообщение
@@ -741,10 +728,10 @@ async def edit_tariff_value(message: Message, state: FSMContext):
     text = get_edit_tariff_text(tariff, current_param, include_crypto, crypto_mode)
     total = get_total_tariff_params(include_crypto, crypto_mode)
     
-    await message.answer(
-        f"✅ *{param['label']}* обновлено!\n\n" + text,
+    await safe_edit_or_send(message,
+        f"✅ <b>{param['label']}</b> обновлено!\n\n" + text,
         reply_markup=edit_tariff_kb(current_param, total),
-        parse_mode="Markdown"
+        force_new=True
     )
 
 
@@ -790,10 +777,9 @@ async def tariff_change_group_start(callback: CallbackQuery, state: FSMContext):
     groups = get_all_groups()
     
     await safe_edit_or_send(callback.message, 
-        f"📂 *Смена группы тарифа «{tariff['name']}»*\n\n"
+        f"📂 <b>Смена группы тарифа «{tariff['name']}»</b>\n\n"
         "Выберите новую группу:",
-        reply_markup=group_select_kb(groups, "tariff_group_change", f"admin_tariff_view:{tariff_id}"),
-        parse_mode="Markdown"
+        reply_markup=group_select_kb(groups, "tariff_group_change", f"admin_tariff_view:{tariff_id}")
     )
     await callback.answer()
 

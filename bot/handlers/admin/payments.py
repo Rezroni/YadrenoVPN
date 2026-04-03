@@ -39,11 +39,10 @@ from bot.keyboards.admin import (
     cards_management_kb,
     back_and_home_kb
 )
-from bot.utils.text import escape_markdown_url, escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -101,43 +100,40 @@ async def show_payments_menu(callback: CallbackQuery, state: FSMContext):
     qr = is_yookassa_qr_enabled()
 
     text = (
-        "💳 *Настройки оплаты*\n\n"
+        "💳 <b>Настройки оплаты</b>\n\n"
         "Здесь можно включить/выключить способы оплаты и настроить их.\n\n"
     )
 
     if stars:
-        text += "🟢 *Telegram Stars*\n"
+        text += "🟢 <b>Telegram Stars</b>\n"
     else:
-        text += "⚪ *Telegram Stars*\n"
+        text += "⚪ <b>Telegram Stars</b>\n"
 
     if crypto:
         item_url = get_setting('crypto_item_url', '')
         if item_url:
-            safe_url = escape_markdown_url(item_url)
-            text += f"🟢 *Крипто (@Ya_SellerBot)*\n[{item_url}]({safe_url})\n"
+            text += f"🟢 <b>Крипто (@Ya_SellerBot)</b>\n<a href=\"{item_url}\">Ссылка на товар</a>\n"
         else:
-            text += "🟢 *Крипто (@Ya_SellerBot)*\n"
+            text += "🟢 <b>Крипто (@Ya_SellerBot)</b>\n"
     else:
-        text += "⚪ *Крипто (@Ya_SellerBot)*\n"
+        text += "⚪ <b>Крипто (@Ya_SellerBot)</b>\n"
 
     if cards:
-        text += "🟢 *Оплата картами (ЮКасса Telegram Payments)*\n"
+        text += "🟢 <b>Оплата картами (ЮКасса Telegram Payments)</b>\n"
     else:
-        text += "⚪ *Оплата картами (ЮКасса Telegram Payments)*\n"
+        text += "⚪ <b>Оплата картами (ЮКасса Telegram Payments)</b>\n"
 
     if qr:
         shop_id = get_setting('yookassa_shop_id', '')
-        text += f"🟢 *QR-оплата (ЮКасса прямая/СБП)* | Shop ID: `{shop_id or '—'}`\n"
+        text += f"🟢 <b>QR-оплата (ЮКасса прямая/СБП)</b> | Shop ID: <code>{shop_id or '—'}</code>\n"
     else:
-        text += "⚪ *QR-оплата (ЮКасса прямая/СБП)*\n"
+        text += "⚪ <b>QR-оплата (ЮКасса прямая/СБП)</b>\n"
 
     monthly_reset = get_setting('monthly_traffic_reset_enabled', '0') == '1'
 
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=payments_menu_kb(stars, crypto, cards, qr, monthly_reset),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=payments_menu_kb(stars, crypto, cards, qr, monthly_reset)
     )
     await callback.answer()
 
@@ -219,35 +215,33 @@ async def start_crypto_setup(callback: CallbackQuery, state: FSMContext):
     mode = get_crypto_integration_mode()
     
     instructions = (
-        "*Режим «Простой» (рекомендуется):*\n"
-        "1️⃣ В @Ya\\_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
-        "2️⃣ Выберите тип позиции: *Счет*\n\n"
-        "🎬 *Актуальная инструкция как добавлять:*\n"
-        "[Смотреть видео](https://youtu.be/cK0wX2LKxcs)\n\n"
-        "⚠️ *ВАЖНО:*\n"
-        "• Тип позиции — именно *Счет*, а НЕ *Товар*!\n"
-        "• Тарифы добавлять к позиции *НЕ нужно* — в режиме «Счет» их нельзя туда добавить.\n"
+        "<b>Режим «Простой» (рекомендуется):</b>\n"
+        "1️⃣ В @Ya_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
+        "2️⃣ Выберите тип позиции: <b>Счет</b>\n\n"
+        "🎬 <b>Актуальная инструкция как добавлять:</b>\n"
+        "<a href=\"https://youtu.be/cK0wX2LKxcs\">Смотреть видео</a>\n\n"
+        "⚠️ <b>ВАЖНО:</b>\n"
+        "• Тип позиции — именно <b>Счет</b>, а НЕ <b>Товар</b>!\n"
+        "• Тарифы добавлять к позиции <b>НЕ нужно</b> — в режиме «Счет» их нельзя туда добавить.\n"
         "• Бот сам сформирует сумму оплаты на основе выбранного тарифа.\n\n"
     ) if mode == 'simple' else (
-        "*Режим «Стандартный»:*\n"
-        "1️⃣ Создайте обычный *Товар* в @Ya\\_SellerBot\n"
+        "<b>Режим «Стандартный»:</b>\n"
+        "1️⃣ Создайте обычный <b>Товар</b> в @Ya_SellerBot\n"
         "2️⃣ Добавьте в него тарифы (под номерами 1-9)\n"
         "3️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
-        "🎬 Процесс добавления товара показан в [видео-инструкции](https://www.youtube.com/watch?v=MYRTzvIkbi0).\n\n"
+        "🎬 Процесс добавления товара показан в <a href=\"https://www.youtube.com/watch?v=MYRTzvIkbi0\">видео-инструкции</a>.\n\n"
     )
 
     text = (
-        "💰 *Настройка крипто-платежей*\n\n"
-        "Для приёма криптовалюты мы используем @Ya\\_SellerBot.\n\n"
+        "💰 <b>Настройка крипто-платежей</b>\n\n"
+        "Для приёма криптовалюты мы используем @Ya_SellerBot.\n\n"
         f"{instructions}"
         "🔗 *Теперь скопируйте ссылку на позицию из бота и отправьте её мне:*"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=crypto_setup_kb(1),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=crypto_setup_kb(1)
     )
 
 
@@ -261,9 +255,8 @@ async def process_crypto_url(message: Message, state: FSMContext):
     # Валидация
     param = get_crypto_param_by_index(0)
     if not param['validate'](url):
-        await message.answer(
-            f"❌ {param['error']}\n\nПопробуйте ещё раз:",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ {param['error']}\n\nПопробуйте ещё раз:"
         )
         return
     
@@ -282,11 +275,9 @@ async def process_crypto_url(message: Message, state: FSMContext):
         set_setting('crypto_item_url', url)
         await state.update_data(edit_mode=False)
         
-        safe_url = escape_markdown_url(url)
-        await message.answer(
-            f"✅ Ссылка обновлена!\n[{url}]({safe_url})",
-            parse_mode="Markdown",
-            link_preview_options=LinkPreviewOptions(is_disabled=True)
+        await safe_edit_or_send(message,
+            f"✅ Ссылка обновлена!\n<a href=\"{url}\">{escape_html(url)}</a>",
+            force_new=True
         )
         
         # Создаём фейковый callback для показа меню
@@ -312,17 +303,15 @@ async def process_crypto_url(message: Message, state: FSMContext):
         bot_username = message.bot.my_username if hasattr(message.bot, 'my_username') else "YOUR_BOT"
         callback_url = f"https://t.me/{bot_username}"
 
-        safe_url = escape_markdown_url(url)
-        await message.answer(
-            f"✅ Ссылка принята!\n[{url}]({safe_url})\n\n"
-            "🔔 *Настройка уведомлений:*\n"
-            "В @Ya\\_SellerBot зайдите в настройки вашей созданной позиции → `Уведомления` → `Обратная ссылка` и укажите этот адрес:\n"
-            f"`{callback_url}`\n\n"
-            "🔑 *Ожидаю ввода секретного ключа:*\n"
-            "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`.",
+        await safe_edit_or_send(message,
+            f"✅ Ссылка принята!\n<a href=\"{url}\">{escape_html(url)}</a>\n\n"
+            "🔔 <b>Настройка уведомлений:</b>\n"
+            "В @Ya_SellerBot зайдите в настройки вашей созданной позиции → <code>Уведомления</code> → <code>Обратная ссылка</code> и укажите этот адрес:\n"
+            f"<code>{callback_url}</code>\n\n"
+            "🔑 <b>Ожидаю ввода секретного ключа:</b>\n"
+            "Найти его можно в @Ya_SellerBot: <code>Профиль</code> → <code>Ключ подписи</code>.",
             reply_markup=crypto_setup_kb(2),
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-            parse_mode="Markdown"
+            force_new=True
         )
 
 
@@ -336,9 +325,8 @@ async def process_crypto_secret(message: Message, state: FSMContext):
     # Валидация
     param = get_crypto_param_by_index(1)
     if not param['validate'](secret):
-        await message.answer(
-            f"❌ {param['error']}\n\nПопробуйте ещё раз:",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ {param['error']}\n\nПопробуйте ещё раз:"
         )
         return
     
@@ -356,7 +344,7 @@ async def process_crypto_secret(message: Message, state: FSMContext):
         # Режим редактирования - сохраняем и возвращаемся в меню
         set_setting('crypto_secret_key', secret)
         await state.update_data(edit_mode=False)
-        await message.answer("✅ Секретный ключ обновлён!")
+        await safe_edit_or_send(message, "✅ Секретный ключ обновлён!", force_new=True)
         
         # Создаём фейковый callback для показа меню
         class FakeCallback:
@@ -379,16 +367,14 @@ async def process_crypto_secret(message: Message, state: FSMContext):
         await state.set_state(AdminStates.payments_menu)
         
         item_url = crypto_data.get('crypto_item_url', '')
-        safe_url = escape_markdown_url(item_url)
         
-        await message.answer(
-            "✅ *Все данные введены!*\n\n"
-            f"📦 Товар: [{item_url}]({safe_url})\n"
-            f"🔐 Ключ: `{'•' * 16}`\n\n"
+        await safe_edit_or_send(message,
+            "✅ <b>Все данные введены!</b>\n\n"
+            f"📦 Товар: <a href=\"{item_url}\">{escape_html(item_url)}</a>\n"
+            f"🔐 Ключ: <code>{'•' * 16}</code>\n\n"
             "Сохранить и включить крипто-платежи?",
             reply_markup=crypto_setup_confirm_kb(),
-            parse_mode="Markdown",
-            link_preview_options=LinkPreviewOptions(is_disabled=True)
+            force_new=True
         )
 
 
@@ -436,10 +422,9 @@ async def crypto_setup_save(callback: CallbackQuery, state: FSMContext):
     await callback.answer("✅ Крипто-платежи включены!")
     
     await safe_edit_or_send(callback.message, 
-        "✅ *Крипто-платежи настроены и включены!*\n\n"
+        "✅ <b>Крипто-платежи настроены и включены!</b>\n\n"
         "Теперь пользователи смогут оплачивать криптовалютой.\n"
-        "Не забудьте добавить тарифы с указанием ID тарифа (1-9)!",
-        parse_mode="Markdown"
+        "Не забудьте добавить тарифы с указанием ID тарифа (1-9)!"
     )
     
     # Показываем меню оплат
@@ -464,37 +449,35 @@ async def show_crypto_management_menu(callback: CallbackQuery, state: FSMContext
     mode_title = "Простой (Счет)" if mode == 'simple' else "Стандартный (Товар)"
     
     mode_description = (
-        "ℹ️ *В Простом (Счет) режиме* бот генерирует ссылку на оплату с указанием точной суммы в долларах (из настроек тарифа).\n\n"
-        "⚠️ *ВАЖНО:* В Ya.Seller позиция обязательно должна иметь тип *«Счет»*, а НЕ *«Товар»*! Тарифы к позиции добавлять не нужно — бот сам указывает сумму. Настраивать ID тарифов (external\\_id) не требуется.\n\n"
+        "ℹ️ <b>В Простом (Счет) режиме</b> бот генерирует ссылку на оплату с указанием точной суммы в долларах (из настроек тарифа).\n\n"
+        "⚠️ <b>ВАЖНО:</b> В Ya.Seller позиция обязательно должна иметь тип <b>«Счет»</b>, а НЕ <b>«Товар»</b>! Тарифы к позиции добавлять не нужно — бот сам указывает сумму. Настраивать ID тарифов (external_id) не требуется.\n\n"
     ) if mode == 'simple' else (
-        "ℹ️ *В Стандартном режиме* бот отправляет покупателя на одну ссылку-товар, где он выбирает тариф. Вам нужно обязательно заполнить поле «ID тарифа из Ya.Seller» для каждого тарифа.\n\n"
+        "ℹ️ <b>В Стандартном режиме</b> бот отправляет покупателя на одну ссылку-товар, где он выбирает тариф. Вам нужно обязательно заполнить поле «ID тарифа из Ya.Seller» для каждого тарифа.\n\n"
     )
     
     if item_url:
-        safe_url = escape_markdown_url(item_url)
+        safe_url = escape_html(item_url)
         text = (
-            "💰 *Управление крипто-платежами*\n\n"
-            f"{status_emoji} Статус: *{status_text}*\n"
-            f"📦 Ссылка/Товар: [{item_url}]({safe_url})\n"
-            f"⚙️ Текущий режим: *{mode_title}*\n\n"
+            "💰 <b>Управление крипто-платежами</b>\n\n"
+            f"{status_emoji} Статус: <b>{status_text}</b>\n"
+            f"📦 Ссылка/Товар: <a href=\"{item_url}\">{safe_url}</a>\n"
+            f"⚙️ Текущий режим: <b>{mode_title}</b>\n\n"
             f"{mode_description}"
             "Выберите действие:"
         )
     else:
         text = (
-            "💰 *Управление крипто-платежами*\n\n"
-            f"{status_emoji} Статус: *{status_text}*\n"
+            "💰 <b>Управление крипто-платежами</b>\n\n"
+            f"{status_emoji} Статус: <b>{status_text}</b>\n"
             "📦 Ссылка/Товар: —\n"
-            f"⚙️ Текущий режим: *{mode_title}*\n\n"
+            f"⚙️ Текущий режим: <b>{mode_title}</b>\n\n"
             f"{mode_description}"
             "Выберите действие:"
         )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=crypto_management_kb(is_enabled, mode),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=crypto_management_kb(is_enabled, mode)
     )
     await callback.answer()
 
@@ -550,44 +533,42 @@ async def crypto_mgmt_edit_url(callback: CallbackQuery, state: FSMContext):
     mode = get_crypto_integration_mode()
     
     instructions = (
-        "*Режим «Простой» (Счет):*\n"
-        "1️⃣ В @Ya\\_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
-        "2️⃣ Выберите тип позиции: *Счет*\n\n"
-        "🎬 *Актуальная инструкция как добавлять:*\n"
-        "[Смотреть видео](https://youtu.be/cK0wX2LKxcs)\n\n"
-        "⚠️ *ВАЖНО:*\n"
-        "• Тип позиции — именно *Счет*, а НЕ *Товар*!\n"
-        "• Тарифы добавлять к позиции *НЕ нужно* — в режиме «Счет» их нельзя туда добавить.\n"
+        "<b>Режим «Простой» (Счет):</b>\n"
+        "1️⃣ В @Ya_SellerBot выберите «Управление» → «Товары» → «Добавить»\n"
+        "2️⃣ Выберите тип позиции: <b>Счет</b>\n\n"
+        "🎬 <b>Актуальная инструкция как добавлять:</b>\n"
+        "<a href=\"https://youtu.be/cK0wX2LKxcs\">Смотреть видео</a>\n\n"
+        "⚠️ <b>ВАЖНО:</b>\n"
+        "• Тип позиции — именно <b>Счет</b>, а НЕ <b>Товар</b>!\n"
+        "• Тарифы добавлять к позиции <b>НЕ нужно</b> — в режиме «Счет» их нельзя туда добавить.\n"
         "• Бот сам сформирует сумму оплаты на основе выбранного тарифа.\n\n"
     ) if mode == 'simple' else (
-        "*Режим «Стандартный» (Товар):*\n"
-        "1️⃣ Создайте обычный *Товар* в @Ya\\_SellerBot\n"
+        "<b>Режим «Стандартный» (Товар):</b>\n"
+        "1️⃣ Создайте обычный <b>Товар</b> в @Ya_SellerBot\n"
         "2️⃣ Добавьте в него тарифы (под номерами 1-9)\n"
         "3️⃣ Обязательно добавьте ID тарифов (1-9) из бота Ya.Seller в каждый тариф нашего VPN-бота.\n\n"
-        "🎬 Процесс добавления товара показан в [видео-инструкции](https://www.youtube.com/watch?v=MYRTzvIkbi0).\n\n"
+        "🎬 Процесс добавления товара показан в <a href=\"https://www.youtube.com/watch?v=MYRTzvIkbi0\">видео-инструкции</a>.\n\n"
     )
     
     if current_url:
-        safe_url = escape_markdown_url(current_url)
+        safe_url = escape_html(current_url)
         text = (
-            "🔗 *Изменение ссылки*\n\n"
+            "🔗 <b>Изменение ссылки</b>\n\n"
             f"{instructions}"
-            f"Текущая ссылка: [{current_url}]({safe_url})\n\n"
-            "🔗 *Введите новую ссылку из @Ya_SellerBot:*"
+            f"Текущая ссылка: <a href=\"{current_url}\">{safe_url}</a>\n\n"
+            "🔗 <b>Введите новую ссылку из @Ya_SellerBot:</b>"
         )
     else:
         text = (
-            "🔗 *Изменение ссылки*\n\n"
+            "🔗 <b>Изменение ссылки</b>\n\n"
             f"{instructions}"
             "Текущая ссылка: —\n\n"
-            "🔗 *Введите новую ссылку из @Ya_SellerBot:*"
+            "🔗 <b>Введите новую ссылку из @Ya_SellerBot:</b>"
         )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=back_and_home_kb("admin_crypto_management"),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=back_and_home_kb("admin_crypto_management")
     )
     await callback.answer()
 
@@ -606,18 +587,17 @@ async def crypto_mgmt_edit_secret(callback: CallbackQuery, state: FSMContext):
     callback_url = f"https://t.me/{bot_username}"
 
     text = (
-        "🔐 *Изменение секретного ключа*\n\n"
-        "🔔 *Настройка уведомлений:*\n"
-        "В @Ya\\_SellerBot зайдите в настройки вашей созданной позиции → `Уведомления` → `Обратная ссылка` и укажите этот адрес:\n"
-        f"`{callback_url}`\n\n"
-        "🔑 *Ожидаю ввода нового секретного ключа:*\n"
-        "Найти его можно в @Ya\\_SellerBot: `Профиль` → `Ключ подписи`."
+        "🔐 <b>Изменение секретного ключа</b>\n\n"
+        "🔔 <b>Настройка уведомлений:</b>\n"
+        "В @Ya_SellerBot зайдите в настройки вашей созданной позиции → <code>Уведомления</code> → <code>Обратная ссылка</code> и укажите этот адрес:\n"
+        f"<code>{callback_url}</code>\n\n"
+        "🔑 <b>Ожидаю ввода нового секретного ключа:</b>\n"
+        "Найти его можно в @Ya_SellerBot: <code>Профиль</code> → <code>Ключ подписи</code>."
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=back_and_home_kb("admin_crypto_management"),
-        parse_mode="Markdown"
+        reply_markup=back_and_home_kb("admin_crypto_management")
     )
     await callback.answer()
 
@@ -663,17 +643,16 @@ async def show_crypto_edit_screen(callback: CallbackQuery, state: FSMContext, pa
         display_value = current_value or '—'
     
     text = (
-        f"⚙️ *Настройки крипто-платежей* ({param_index + 1}/{total})\n\n"
-        f"📌 Параметр: *{param['label']}*\n"
-        f"📝 Текущее значение: `{display_value}`\n\n"
+        f"⚙️ <b>Настройки крипто-платежей</b> ({param_index + 1}/{total})\n\n"
+        f"📌 Параметр: <b>{param['label']}</b>\n"
+        f"📝 Текущее значение: <code>{display_value}</code>\n\n"
         f"Введите новое значение или используйте кнопки навигации:\n"
         f"({param['hint']})"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=edit_crypto_kb(param_index, total),
-        parse_mode="Markdown"
+        reply_markup=edit_crypto_kb(param_index, total)
     )
 
 
@@ -726,9 +705,8 @@ async def edit_crypto_value(message: Message, state: FSMContext):
     
     # Валидация
     if not param['validate'](value):
-        await message.answer(
-            f"❌ {param['error']}",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ {param['error']}"
         )
         return
     
@@ -742,9 +720,9 @@ async def edit_crypto_value(message: Message, state: FSMContext):
         pass
     
     # Показываем обновлённый экран
-    await message.answer(
-        f"✅ *{param['label']}* обновлено!",
-        parse_mode="Markdown"
+    await safe_edit_or_send(message,
+        f"✅ <b>{param['label']}</b> обновлено!",
+        force_new=True
     )
     
     # Создаём фейковый callback для показа экрана
@@ -795,26 +773,24 @@ async def show_cards_management_menu(callback: CallbackQuery, state: FSMContext)
     if token:
         # Маскируем токен: первые 4 и последние 4 символа
         masked_token = f"{token[:4]}...{token[-4:]}"
-        token_display = f"Установлен ✅ (`{masked_token}`)"
+        token_display = f"Установлен ✅ (<code>{masked_token}</code>)"
     else:
         token_display = "Не установлен ❌"
     
     text = (
-        "💳 *Управление оплатой картами*\n\n"
+        "💳 <b>Управление оплатой картами</b>\n\n"
         "Для работы этого способа необходимо настроить провайдера ЮКасса.\n\n"
-        "❗️ *ШАГ 1: РЕГИСТРАЦИЯ*\n"
-        "Обязательно [зарегистрируйте магазин в ЮКассе по этой ссылке](https://yookassa.ru/joinups/?source=sva)\n\n"
+        "❗️ <b>ШАГ 1: РЕГИСТРАЦИЯ</b>\n"
+        "Обязательно <a href=\"https://yookassa.ru/joinups/?source=sva\">зарегистрируйте магазин в ЮКассе по этой ссылке</a>\n\n"
         "После проверки документов ЮКассой переходите к настройке токена.\n\n"
-        f"{status_emoji} Статус: *{status_text}*\n"
-        f"🔑 Provider Token: *{token_display}*\n\n"
+        f"{status_emoji} Статус: <b>{status_text}</b>\n"
+        f"🔑 Provider Token: <b>{token_display}</b>\n\n"
         "Выберите действие:"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=cards_management_kb(is_enabled),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=cards_management_kb(is_enabled)
     )
     await callback.answer()
 
@@ -854,21 +830,20 @@ async def cards_mgmt_edit_token(callback: CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_msg_id=callback.message.message_id)
     
     text = (
-        "🔗 *Установка Provider Token*\n\n"
-        "❗️ *ШАГ 1: РЕГИСТРАЦИЯ В ЮКАССЕ*\n"
-        "Обязательно [зарегистрируйтесь по этой ссылке](https://yookassa.ru/joinups/?source=sva)\n\n"
-        "*ШАГ 2: ПОЛУЧЕНИЕ ТОКЕНА В @BotFather*\n"
-        "1. Отправьте команду `/mybots` и выберите бота.\n"
-        "2. Нажмите `Payments` → `YooKassa`.\n"
+        "🔗 <b>Установка Provider Token</b>\n\n"
+        "❗️ <b>ШАГ 1: РЕГИСТРАЦИЯ В ЮКАССЕ</b>\n"
+        "Обязательно <a href=\"https://yookassa.ru/joinups/?source=sva\">зарегистрируйтесь по этой ссылке</a>\n\n"
+        "<b>ШАГ 2: ПОЛУЧЕНИЕ ТОКЕНА В @BotFather</b>\n"
+        "1. Отправьте команду <code>/mybots</code> и выберите бота.\n"
+        "2. Нажмите <code>Payments</code> → <code>YooKassa</code>.\n"
         "3. Подключите магазин в боте провайдера и **обязательно вернитесь в @BotFather**.\n"
-        "4. В BotFather снова откройте `Payments`, там появится токен.\n\n"
+        "4. В BotFather снова откройте <code>Payments</code>, там появится токен.\n\n"
         "Отправьте полученный токен ответом на это сообщение:"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=back_and_home_kb("admin_payments_cards"),
-        parse_mode="Markdown"
+        reply_markup=back_and_home_kb("admin_payments_cards")
     )
     await callback.answer()
 
@@ -884,7 +859,7 @@ async def cards_setup_token_value(message: Message, state: FSMContext):
     token = get_message_text_for_storage(message, 'plain')
     
     if len(token) < 20 or ':' not in token:
-        await message.answer("❌ Неверный формат токена. Попробуйте ещё раз:")
+        await safe_edit_or_send(message, "❌ Неверный формат токена. Попробуйте ещё раз:")
         return
     
     set_setting('cards_provider_token', token)
@@ -906,7 +881,7 @@ async def cards_setup_token_value(message: Message, state: FSMContext):
             )
         except Exception:
             # Если не вышло (например, сообщение удалено), будем отвечать новым
-            menu_message = await message.answer("⌛ Сохранение...")
+            menu_message = await safe_edit_or_send(message, "⌛ Сохранение...", force_new=True)
 
     # Возвращаемся в меню через FakeCallback
     class FakeCallback:
@@ -966,18 +941,18 @@ async def show_qr_management_menu(callback: CallbackQuery, state: FSMContext):
     status_emoji = "🟢" if is_enabled else "⚪"
     status_text = "включено" if is_enabled else "выключено"
 
-    shop_display = f"`{shop_id}`" if shop_id else "❌ Не задан"
-    secret_display = f"Установлен ✅ (`{secret_key[:4]}...{secret_key[-4:]}`)" if len(secret_key) >= 8 else "❌ Не задан"
+    shop_display = f"<code>{shop_id}</code>" if shop_id else "❌ Не задан"
+    secret_display = f"Установлен ✅ (<code>{secret_key[:4]}...{secret_key[-4:]}</code>)" if len(secret_key) >= 8 else "❌ Не задан"
 
     text = (
-        "📱 *QR-оплата ЮКасса (прямой API)*\n\n"
+        "📱 <b>QR-оплата ЮКасса (прямой API)</b>\n\n"
         "Позволяет принимать оплату картами и через СБП по QR-коду,\n"
         "без Telegram Payments.\n\n"
-        "📋 *Как получить доступ:*\n"
-        "1. Зарегистрируйте магазин: [yookassa.ru](https://yookassa.ru/joinups/?source=sva)\n"
+        "📋 <b>Как получить доступ:</b>\n"
+        "1. Зарегистрируйте магазин: <a href=\"https://yookassa.ru/joinups/?source=sva\">yookassa.ru</a>\n"
         "2. Перейдите: Настройки → API-интеграция\n"
         "3. Скопируйте Shop ID и сгенерируйте новый Secret Key\n\n"
-        f"{status_emoji} Статус: *{status_text}*\n"
+        f"{status_emoji} Статус: <b>{status_text}</b>\n"
         f"🏪 Shop ID: {shop_display}\n"
         f"🔑 Secret Key: {secret_display}\n\n"
         "Выберите действие:"
@@ -985,9 +960,7 @@ async def show_qr_management_menu(callback: CallbackQuery, state: FSMContext):
 
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=qr_management_kb(is_enabled),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
+        reply_markup=qr_management_kb(is_enabled)
     )
     await callback.answer()
 
@@ -1029,14 +1002,13 @@ async def qr_edit_shop_id(callback: CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_msg_id=callback.message.message_id)
 
     current = get_setting('yookassa_shop_id', '')
-    current_display = f"\nТекущий: `{current}`" if current else ""
+    current_display = f"\nТекущий: <code>{current}</code>" if current else ""
 
     await safe_edit_or_send(callback.message, 
-        f"🏪 *Введите Shop ID ЮКасса*{current_display}\n\n"
-        "Найдите в разделе: *Настройки → API-интеграция* вашего магазина.\n"
-        "(Это числовой ID, например: `123456`)",
-        reply_markup=back_and_home_kb("admin_payments_qr"),
-        parse_mode="Markdown"
+        f"🏪 <b>Введите Shop ID ЮКасса</b>{current_display}\n\n"
+        "Найдите в разделе: <b>Настройки → API-интеграция</b> вашего магазина.\n"
+        "(Это числовой ID, например: <code>123456</code>)",
+        reply_markup=back_and_home_kb("admin_payments_qr")
     )
     await callback.answer()
 
@@ -1049,8 +1021,7 @@ async def qr_setup_shop_id_handler(message: Message, state: FSMContext):
     shop_id = get_message_text_for_storage(message, 'plain')
 
     if not shop_id.isdigit() or len(shop_id) < 3:
-        await message.answer("❌ Некорректный Shop ID. Должен быть числом (например, `123456`).",
-                             parse_mode="Markdown")
+        await safe_edit_or_send(message, "❌ Некорректный Shop ID. Должен быть числом (например, <code>123456</code>).")
         return
 
     try:
@@ -1080,7 +1051,7 @@ async def qr_setup_shop_id_handler(message: Message, state: FSMContext):
                 text="⌛"
             )
         except Exception:
-            menu_message = await message.answer("⌛")
+            menu_message = await safe_edit_or_send(message, "⌛", force_new=True)
 
     fake = FakeCallback(menu_message, message.from_user)
     await show_qr_management_menu(fake, state)
@@ -1098,11 +1069,10 @@ async def qr_edit_secret(callback: CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_msg_id=callback.message.message_id)
 
     await safe_edit_or_send(callback.message, 
-        "🔐 *Введите Secret Key ЮКасса*\n\n"
-        "Найдите в разделе: *Настройки → API-интеграция* вашего магазина.\n"
+        "🔐 <b>Введите Secret Key ЮКасса</b>\n\n"
+        "Найдите в разделе: <b>Настройки → API-интеграция</b> вашего магазина.\n"
         "_(Секретный ключ будет скрыт после сохранения)_",
-        reply_markup=back_and_home_kb("admin_payments_qr"),
-        parse_mode="Markdown"
+        reply_markup=back_and_home_kb("admin_payments_qr")
     )
     await callback.answer()
 
@@ -1115,7 +1085,7 @@ async def qr_setup_secret_key_handler(message: Message, state: FSMContext):
     secret_key = get_message_text_for_storage(message, 'plain')
 
     if len(secret_key) < 16:
-        await message.answer("❌ Слишком короткий ключ. Попробуйте ещё раз.")
+        await safe_edit_or_send(message, "❌ Слишком короткий ключ. Попробуйте ещё раз.")
         return
 
     try:
@@ -1145,7 +1115,7 @@ async def qr_setup_secret_key_handler(message: Message, state: FSMContext):
                 text="⌛"
             )
         except Exception:
-            menu_message = await message.answer("⌛")
+            menu_message = await safe_edit_or_send(message, "⌛", force_new=True)
 
     fake = FakeCallback(menu_message, message.from_user)
     await show_qr_management_menu(fake, state)

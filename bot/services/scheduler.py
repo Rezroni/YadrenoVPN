@@ -60,7 +60,7 @@ async def collect_daily_stats() -> str:
     
     for server in servers:
         if not server.get('is_active'):
-            servers_info.append(f"  🔴 *{server['name']}* — выключен")
+            servers_info.append(f"  🔴 <b>{server['name']}</b> — выключен")
             continue
             
         try:
@@ -73,14 +73,14 @@ async def collect_daily_stats() -> str:
                 cpu_text = f", CPU: {cpu}%" if cpu else ""
                 online = stats.get('online_clients', 0)
                 servers_info.append(
-                    f"  🟢 *{server['name']}*: {online} онлайн, "
+                    f"  🟢 <b>{server['name']}</b>: {online} онлайн, "
                     f"трафик: {traffic}{cpu_text}"
                 )
             else:
-                servers_info.append(f"  🔴 *{server['name']}* — недоступен")
+                servers_info.append(f"  🔴 <b>{server['name']}</b> — недоступен")
         except Exception as e:
             logger.warning(f"Ошибка получения статистики сервера {server['name']}: {e}")
-            servers_info.append(f"  ⚠️ *{server['name']}* — ошибка подключения")
+            servers_info.append(f"  ⚠️ <b>{server['name']}</b> — ошибка подключения")
     
     servers_text = "\n".join(servers_info) if servers_info else "  Нет серверов"
     
@@ -106,25 +106,25 @@ async def collect_daily_stats() -> str:
         payments_text.append(f"⭐{payments_stars}")
     payments_sum = " + ".join(payments_text) if payments_text else "0"
     
-    report = f"""📊 *Суточная статистика за {today}*
+    report = f"""📊 <b>Суточная статистика за {today}</b>
 
-👥 *Пользователи:*
+👥 <b>Пользователи:</b>
   Всего: {users.get('total', 0)}
   Активных: {users.get('active', 0)}
   Новых за сутки: {new_users}
 
-🔑 *VPN-ключи:*
+🔑 <b>VPN-ключи:</b>
   Всего: {keys.get('total', 0)}
   Активных: {keys.get('active', 0)}
   Истёкших: {keys.get('expired', 0)}
   Создано за сутки: {keys.get('created_today', 0)}
 
-💳 *Платежи за сутки:*
+💳 <b>Платежи за сутки:</b>
   Успешных: {payments_total}
   Ожидающих: {payments_pending}
   Сумма: {payments_sum}
 
-🖥️ *Серверы:*
+🖥️ <b>Серверы:</b>
 {servers_text}
 """
     return report
@@ -145,7 +145,7 @@ async def send_daily_stats(bot: Bot) -> None:
                 await bot.send_message(
                     chat_id=admin_id,
                     text=report,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 logger.info(f"Статистика отправлена админу {admin_id}")
             except Exception as e:
@@ -234,8 +234,8 @@ async def send_backup_archive(bot: Bot) -> None:
                 await bot.send_document(
                     chat_id=admin_id,
                     document=BufferedInputFile(archive_data, filename=filename),
-                    caption=f"📦 *Ежедневный бэкап за {today}*\n\nСодержит базы данных бота и VPN-серверов.",
-                    parse_mode="Markdown"
+                    caption=f"📦 <b>Ежедневный бэкап за {today}</b>\n\nСодержит базы данных бота и VPN-серверов.",
+                    parse_mode="HTML"
                 )
                 logger.info(f"Бэкап отправлен админу {admin_id}")
             except Exception as e:
@@ -251,20 +251,20 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
     """
     Проверяет и отправляет уведомления об истекающих ключах.
     
-    Использует единый MarkdownV2-контракт для текстов из редактора.
-    Динамические подстановки экранируются через escape_md2().
+    Использует единый HTML-контракт. Динамические подстановки 
+    экранируются через escape_html().
     """
     logger.info("⏳ Запуск проверки истекающих ключей...")
     try:
-        from bot.utils.text import escape_md2
+        from bot.utils.text import escape_html
         days = int(get_setting('notification_days', '3'))
         from bot.utils.message_editor import get_message_data
         
-        # Дефолтный текст в MarkdownV2
+        # Дефолтный текст в HTML
         default_notification = (
-            '⚠️ *Ваш VPN\\-ключ %имяключа% скоро истекает\\!*\n\n'
-            'Через %дней% дней закончится срок действия вашего ключа\\.\n\n'
-            'Продлите подписку, чтобы сохранить доступ к VPN без перерыва\\!'
+            '⚠️ <b>Ваш VPN-ключ %имяключа% скоро истекает!</b>\n\n'
+            'Через %дней% дней закончится срок действия вашего ключа.\n\n'
+            'Продлите подписку, чтобы сохранить доступ к VPN без перерыва!'
         )
         notification_data = get_message_data('notification_text', default_notification)
         notification_text = notification_data.get('text', default_notification)
@@ -283,11 +283,11 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
             if is_notification_sent_today(vpn_key_id):
                 continue
             
-            # Подстановка с экранированием динамических значений для MarkdownV2
+            # Подстановка с экранированием динамических значений
             text = notification_text.replace(
-                '%дней%', escape_md2(str(days_left))
+                '%дней%', escape_html(str(days_left))
             ).replace(
-                '%имяключа%', escape_md2(str(keyname))
+                '%имяключа%', escape_html(str(keyname))
             )
             
             # Клавиатура с кнопками "Мои ключи" и "На главную"
@@ -303,14 +303,14 @@ async def check_and_send_expiry_notifications(bot: Bot) -> None:
                         photo=notification_photo,
                         caption=text,
                         reply_markup=kb,
-                        parse_mode="MarkdownV2"
+                        parse_mode="HTML"
                     )
                 else:
                     await bot.send_message(
                         chat_id=user_telegram_id,
                         text=text,
                         reply_markup=kb,
-                        parse_mode="MarkdownV2"
+                        parse_mode="HTML"
                     )
                 log_notification_sent(vpn_key_id)
                 sent_count += 1
@@ -441,12 +441,12 @@ async def check_and_notify_updates(bot: Bot) -> None:
             kb = builder.as_markup()
             
             # Формируем текст уведомления
-            notify_text = f"📦 *Доступно обновление!*\n\n{log_text}"
+            notify_text = f"📦 <b>Доступно обновление!</b>\n\n{log_text}"
             
             # Если есть блокирующий коммит — добавляем предупреждение
             if has_blocking and blocking_commit:
                 blocking_msg = blocking_commit['message'].lstrip('!')
-                notify_text += f"\n\n⚠️ Среди обновлений есть *блокирующий коммит* — обновление нужно выполнять вручную.\n`{blocking_msg}`"
+                notify_text += f"\n\n⚠️ Среди обновлений есть <b>блокирующий коммит</b> — обновление нужно выполнять вручную.\n<code>{blocking_msg}</code>"
             
             # Отправляем уведомления админам
             for admin_id in ADMIN_IDS:
@@ -455,7 +455,7 @@ async def check_and_notify_updates(bot: Bot) -> None:
                         chat_id=admin_id,
                         text=notify_text,
                         reply_markup=kb,
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                 except Exception as e:
                     logger.warning(f"Не удалось отправить уведомление об обновлении админу {admin_id}: {e}")
@@ -644,19 +644,19 @@ async def monthly_traffic_reset(bot: Bot) -> None:
                 logger.error(f"Ошибка сверки сервера {server.get('name', server_id)}: {e}")
     
     # === Отчёт админам ===
-    report_parts = ["🔄 *Ежемесячное обслуживание*\n"]
+    report_parts = ["🔄 <b>Ежемесячное обслуживание</b>\n"]
     if reset_enabled:
-        report_parts.append(f"📊 *Сброс трафика:* ✅ {reset_success}")
+        report_parts.append(f"📊 <b>Сброс трафика:</b> ✅ {reset_success}")
         if reset_errors > 0:
             report_parts.append(f"  ❌ Ошибок: {reset_errors}")
-    report_parts.append(f"🔍 *Сверка БД↔панель:* 🔧 {sync_fixed}")
+    report_parts.append(f"🔍 <b>Сверка БД↔панель:</b> 🔧 {sync_fixed}")
     if sync_errors > 0:
         report_parts.append(f"  ❌ Ошибок: {sync_errors}")
     
     report = "\n".join(report_parts)
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(chat_id=admin_id, text=report, parse_mode="Markdown")
+            await bot.send_message(chat_id=admin_id, text=report, parse_mode="HTML")
         except Exception as e:
             logger.warning(f"Не удалось отправить отчёт админу {admin_id}: {e}")
 
@@ -745,7 +745,7 @@ async def sync_traffic_stats(bot: Bot) -> None:
     # Проверяем пороги уведомлений
     notification_text_template = get_setting(
         'traffic_notification_text',
-        '⚠️ По ключу *{keyname}* осталось {percent}% трафика ({used} из {limit})'
+        '⚠️ По ключу <b>{keyname}</b> осталось {percent}% трафика ({used} из {limit})'
     )
     
     for key in keys:
@@ -786,7 +786,7 @@ async def sync_traffic_stats(bot: Bot) -> None:
                         await bot.send_message(
                             chat_id=telegram_id,
                             text=msg,
-                            parse_mode="Markdown"
+                            parse_mode="HTML"
                         )
                     except Exception as e:
                         logger.warning(f"Не удалось отправить уведомление о трафике пользователю {telegram_id}: {e}")

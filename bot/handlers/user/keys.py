@@ -11,10 +11,9 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -22,7 +21,7 @@ router = Router()
 async def cmd_mykeys(message: Message, state: FSMContext):
     """Обработчик команды /mykeys - вызывает логику кнопки 'Мои ключи'."""
     if is_user_banned(message.from_user.id):
-        await message.answer('⛔ *Доступ заблокирован*\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', parse_mode='Markdown')
+        await safe_edit_or_send(message, '⛔ <b>Доступ заблокирован</b>\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', force_new=True)
         return
     await state.clear()
     await show_my_keys(message.from_user.id, message)
@@ -43,11 +42,11 @@ async def show_my_keys(telegram_id: int, message, is_callback: bool = True):
     keys = get_user_keys_for_display(telegram_id)
     if not keys:
         if is_callback:
-            await safe_edit_or_send(message, '🔑 *Мои ключи*\n\nУ вас пока нет VPN-ключей.\n\nНажмите «Купить ключ» на главной, чтобы приобрести доступ! 🚀', reply_markup=home_only_kb(), parse_mode='Markdown')
+            await safe_edit_or_send(message, '🔑 <b>Мои ключи</b>\n\nУ вас пока нет VPN-ключей.\n\nНажмите «Купить ключ» на главной, чтобы приобрести доступ! 🚀', reply_markup=home_only_kb())
         else:
-            await message.answer('🔑 *Мои ключи*\n\nУ вас пока нет VPN-ключей.\n\nНажмите «Купить ключ» на главной, чтобы приобрести доступ! 🚀', reply_markup=home_only_kb(), parse_mode='Markdown')
+            await safe_edit_or_send(message, '🔑 <b>Мои ключи</b>\n\nУ вас пока нет VPN-ключей.\n\nНажмите «Купить ключ» на главной, чтобы приобрести доступ! 🚀', reply_markup=home_only_kb(), force_new=True)
         return
-    lines = ['🔑 *Мои ключи*\n']
+    lines = ['🔑 <b>Мои ключи</b>\n']
     for key in keys:
         if key['is_active'] and (not is_traffic_exhausted(key)):
             status_emoji = '🟢'
@@ -71,15 +70,15 @@ async def show_my_keys(telegram_id: int, message, is_callback: bool = True):
                 logger.warning(f"Не удалось получить протокол для ключа {key['id']}: {e}")
         expires = key['expires_at'][:10] if key['expires_at'] else '—'
         server = key.get('server_name') or 'Не выбран'
-        lines.append(f"{status_emoji}*{escape_md(key['display_name'])}* - {traffic_text} - до {expires}")
-        lines.append(f'     📍{escape_md(server)} - {escape_md(inbound_name)} ({escape_md(protocol)})')
+        lines.append(f"{status_emoji}<b>{escape_html(key['display_name'])}</b> - {traffic_text} - до {expires}")
+        lines.append(f'     📍{escape_html(server)} - {escape_html(inbound_name)} ({escape_html(protocol)})')
         lines.append('')
     lines.append('Выберите ключ для управления:')
     text = '\n'.join(lines)
     if is_callback:
-        await safe_edit_or_send(message, text, reply_markup=my_keys_list_kb(keys), parse_mode='Markdown')
+        await safe_edit_or_send(message, text, reply_markup=my_keys_list_kb(keys))
     else:
-        await message.answer(text, reply_markup=my_keys_list_kb(keys), parse_mode='Markdown')
+        await safe_edit_or_send(message, text, reply_markup=my_keys_list_kb(keys), force_new=True)
 
 @router.callback_query(F.data == 'my_keys')
 async def my_keys_handler(callback: CallbackQuery):
@@ -100,7 +99,7 @@ async def show_key_details(telegram_id: int, key_id: int, message, is_callback: 
         if is_callback:
             await safe_edit_or_send(message, '❌ Ключ не найден или вы не являетесь его владельцем.')
         else:
-            await message.answer('❌ Ключ не найден или вы не являетесь его владельцем.')
+            await safe_edit_or_send(message, '❌ Ключ не найден или вы не являетесь его владельцем.', force_new=True)
         return
     traffic_exhausted = is_traffic_exhausted(key)
     key_active = is_key_active(key)
@@ -142,13 +141,13 @@ async def show_key_details(telegram_id: int, key_id: int, message, is_callback: 
     if prepend_text:
         lines.append(prepend_text)
         lines.append('')
-    lines.extend([f"🔑 *{escape_md(key['display_name'])}*\n", f'*Статус:* {status}', f'*Сервер:* {escape_md(server)}', f'*Протокол:* {escape_md(inbound_name)} ({escape_md(protocol)})', f'*Трафик:* {traffic_info}', f'*Действует до:* {expires}', ''])
+    lines.extend([f"🔑 <b>{escape_html(key['display_name'])}</b>\n", f'<b>Статус:</b> {status}', f'<b>Сервер:</b> {escape_html(server)}', f'<b>Протокол:</b> {escape_html(inbound_name)} ({escape_html(protocol)})', f'<b>Трафик:</b> {traffic_info}', f'<b>Действует до:</b> {expires}', ''])
     payments = get_key_payments_history(key_id)
     if payments:
-        lines.append('📜 *История операций:*')
+        lines.append('📜 <b>История операций:</b>')
         for p in payments:
             date = p['paid_at'][:10] if p['paid_at'] else '—'
-            tariff = escape_md(p.get('tariff_name') or 'Тариф')
+            tariff = escape_html(p.get('tariff_name') or 'Тариф')
             amount_val = p['amount_cents'] / 100
             amount_str = f'{amount_val:g}'.replace('.', ',')
             if p['payment_type'] == 'stars':
@@ -159,9 +158,9 @@ async def show_key_details(telegram_id: int, key_id: int, message, is_callback: 
     msg_text = '\n'.join(lines)
     kb = key_manage_kb(key_id, is_unconfigured=is_unconfigured, is_active=key_active, is_traffic_exhausted=traffic_exhausted)
     if is_callback:
-        await safe_edit_or_send(message, msg_text, reply_markup=kb, parse_mode='Markdown')
+        await safe_edit_or_send(message, msg_text, reply_markup=kb)
     else:
-        await message.answer(msg_text, reply_markup=kb, parse_mode='Markdown')
+        await safe_edit_or_send(message, msg_text, reply_markup=kb, force_new=True)
 
 @router.callback_query(F.data.startswith('key_delete:'))
 async def key_delete_handler(callback: CallbackQuery):
@@ -214,7 +213,7 @@ async def key_show_handler(callback: CallbackQuery):
         await callback.answer('❌ Ключ не найден или вы не являетесь его владельцем.', show_alert=True)
         return
     if not key['client_uuid']:
-        await safe_edit_or_send(callback.message, '📋 *Показать ключ*\n\n⚠️ Ключ ещё не создан на сервере.\nОбратитесь в поддержку.', reply_markup=key_show_kb(key_id), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '📋 <b>Показать ключ</b>\n\n⚠️ Ключ ещё не создан на сервере.\nОбратитесь в поддержку.', reply_markup=key_show_kb(key_id))
         await callback.answer()
         return
     try:
@@ -242,7 +241,7 @@ async def key_renew_select_payment(callback: CallbackQuery):
     from database.requests import is_yookassa_qr_configured
     yookassa_qr = is_yookassa_qr_configured()
     if not crypto_configured and (not stars_enabled) and (not cards_enabled) and (not yookassa_qr):
-        await safe_edit_or_send(callback.message, '💳 *Продление ключа*\n\n😔 Способы оплаты временно недоступны.\nПопробуйте позже.', reply_markup=back_and_home_kb(back_callback=f'key:{key_id}'), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '💳 <b>Продление ключа</b>\n\n😔 Способы оплаты временно недоступны.\nПопробуйте позже.', reply_markup=back_and_home_kb(back_callback=f'key:{key_id}'))
         await callback.answer()
         return
     crypto_url = None
@@ -264,7 +263,7 @@ async def key_renew_select_payment(callback: CallbackQuery):
             balance_cents = get_user_balance(user_id)
             if balance_cents > 0:
                 show_balance_button = True
-    await safe_edit_or_send(callback.message, f"💳 *Продление ключа*\n\n🔑 Ключ: *{key['display_name']}*\n\nВыберите способ оплаты:", reply_markup=renew_payment_method_kb(key_id=key_id, crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, show_balance_button=show_balance_button), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"💳 <b>Продление ключа</b>\n\n🔑 Ключ: <b>{escape_html(key['display_name'])}</b>\n\nВыберите способ оплаты:", reply_markup=renew_payment_method_kb(key_id=key_id, crypto_url=crypto_url, crypto_mode=crypto_mode, crypto_configured=crypto_configured, stars_enabled=stars_enabled, cards_enabled=cards_enabled, yookassa_qr_enabled=yookassa_qr, show_balance_button=show_balance_button))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('key_replace:'))
@@ -305,7 +304,7 @@ async def key_replace_start_handler(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ReplaceKey.users_server)
     await state.update_data(replace_key_id=key_id)
-    await safe_edit_or_send(callback.message, '🔄 *Замена ключа*\n\nВы можете пересоздать ключ на другом или том же сервере.\nСтарый ключ будет удалён, но срок действия сохранится.\n\nВыберите сервер:', reply_markup=replace_server_list_kb(servers, key_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '🔄 <b>Замена ключа</b>\n\nВы можете пересоздать ключ на другом или том же сервере.\nСтарый ключ будет удалён, но срок действия сохранится.\n\nВыберите сервер:', reply_markup=replace_server_list_kb(servers, key_id))
     await callback.answer()
 
 @router.callback_query(ReplaceKey.users_server, F.data.startswith('replace_server:'))
@@ -329,7 +328,7 @@ async def key_replace_server_handler(callback: CallbackQuery, state: FSMContext)
         data = await state.get_data()
         key_id = data.get('replace_key_id')
         await state.set_state(ReplaceKey.users_inbound)
-        await safe_edit_or_send(callback.message, f"🖥️ *Сервер:* {server['name']}\n\nВыберите протокол:", reply_markup=replace_inbound_list_kb(inbounds, key_id), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f"🖥️ <b>Сервер:</b> {escape_html(server['name'])}\n\nВыберите протокол:", reply_markup=replace_inbound_list_kb(inbounds, key_id))
     except VPNAPIError as e:
         await callback.answer(f'❌ Ошибка подключения: {e}', show_alert=True)
     await callback.answer()
@@ -347,7 +346,7 @@ async def key_replace_inbound_handler(callback: CallbackQuery, state: FSMContext
     key = get_key_details_for_user(key_id, callback.from_user.id)
     server = get_server_by_id(server_id)
     await state.set_state(ReplaceKey.confirm)
-    await safe_edit_or_send(callback.message, f"⚠️ *Подтверждение замены*\n\nКлюч: *{key['display_name']}*\nНовый сервер: *{server['name']}*\n\nСтарый ключ будет удалён и перестанет работать.\nВам нужно будет обновить настройки в приложении.\n\nВы уверены?", reply_markup=replace_confirm_kb(key_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"⚠️ <b>Подтверждение замены</b>\n\nКлюч: <b>{escape_html(key['display_name'])}</b>\nНовый сервер: <b>{escape_html(server['name'])}</b>\n\nСтарый ключ будет удалён и перестанет работать.\nВам нужно будет обновить настройки в приложении.\n\nВы уверены?", reply_markup=replace_confirm_kb(key_id))
     await callback.answer()
 
 @router.callback_query(ReplaceKey.confirm, F.data == 'replace_confirm')
@@ -434,7 +433,7 @@ async def key_rename_start_handler(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(RenameKey.waiting_for_name)
     await state.update_data(key_id=key_id)
-    await safe_edit_or_send(callback.message, f"✏️ *Переименование ключа*\n\nТекущее имя: *{key['display_name']}*\n\nВведите новое название для ключа (макс. 30 символов):\n_(Отправьте любой текст)_", reply_markup=cancel_kb(cancel_callback=f'key:{key_id}'), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"✏️ <b>Переименование ключа</b>\n\nТекущее имя: <b>{escape_html(key['display_name'])}</b>\n\nВведите новое название для ключа (макс. 30 символов):\n<i>(Отправьте любой текст)</i>", reply_markup=cancel_kb(cancel_callback=f'key:{key_id}'))
     await callback.answer()
 
 @router.message(RenameKey.waiting_for_name)
@@ -447,27 +446,15 @@ async def key_rename_submit_handler(message: Message, state: FSMContext):
     new_name = get_message_text_for_storage(message, 'plain')
     if not key_id:
         await state.clear()
-        await message.answer('❌ Ошибка состояния. Попробуйте снова.')
+        await safe_edit_or_send(message, '❌ Ошибка состояния. Попробуйте снова.')
         return
     if len(new_name) > 30:
-        await message.answer('⚠️ Имя слишком длинное (макс. 30 символов). Попробуйте короче.')
+        await safe_edit_or_send(message, '⚠️ Имя слишком длинное (макс. 30 символов). Попробуйте короче.')
         return
     success = update_key_custom_name(key_id, message.from_user.id, new_name)
     if success:
-        await message.answer(f'✅ Ключ переименован в *{new_name}*', parse_mode='Markdown')
+        prepend = f'✅ Ключ переименован в <b>{escape_html(new_name)}</b>'
     else:
-        await message.answer('❌ Не удалось переименовать ключ.', parse_mode='Markdown')
+        prepend = '❌ Не удалось переименовать ключ.'
     await state.clear()
-    from database.requests import get_key_details_for_user, get_key_payments_history
-    from bot.keyboards.user import key_manage_kb
-    key = get_key_details_for_user(key_id, message.from_user.id)
-    if not key:
-        return
-    if key['is_active']:
-        status = '🟢 Активен'
-    else:
-        status = '🔴 Истёк'
-    expires = key['expires_at'][:10] if key['expires_at'] else '—'
-    server = key.get('server_name') or 'Не выбран'
-    lines = [f"🔑 *{key['display_name']}*\n", f'*Статус:* {status}', f'*Сервер:* {server}', f'*Действует до:* {expires}', '']
-    await message.answer('\n'.join(lines), reply_markup=key_manage_kb(key_id), parse_mode='Markdown')
+    await show_key_details(message.from_user.id, key_id, message, is_callback=False, prepend_text=prepend)

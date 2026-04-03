@@ -4,11 +4,10 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -30,7 +29,7 @@ async def renew_crypto_select_tariff(callback: CallbackQuery):
     if not tariffs:
         await callback.answer('Нет доступных тарифов', show_alert=True)
         return
-    await safe_edit_or_send(callback.message, f"💰 *Оплата криптовалютой*\n\n🔑 Ключ: *{escape_md(key['display_name'])}*\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id, is_crypto=True), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"💰 <b>Оплата криптовалютой</b>\n\n🔑 Ключ: <b>{escape_html(key['display_name'])}</b>\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id, is_crypto=True))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('renew_pay_crypto:'))
@@ -61,15 +60,13 @@ async def renew_crypto_invoice(callback: CallbackQuery):
         await callback.answer('❌ Ошибка настройки крипто-платежей', show_alert=True)
         return
     crypto_url = build_crypto_payment_url(item_id=item_id, invoice_id=order_id, tariff_external_id=None, price_cents=tariff['price_cents'])
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text='💰 Перейти к оплате', url=crypto_url))
     cb_data = f'renew_crypto_tariff:{key_id}:{order_id}' if order_id else f'renew_crypto_tariff:{key_id}'
     builder.row(InlineKeyboardButton(text='⬅️ Назад', callback_data=cb_data))
     price_usd = tariff['price_cents'] / 100
     price_str = f'${price_usd:g}'.replace('.', ',')
-    await safe_edit_or_send(callback.message, f"💰 *Продление ключа*\n\n🔑 Ключ: *{escape_md(key['display_name'])}*\nТариф: *{tariff['name']}*\nСумма к оплате: *{price_str}*\n\nНажмите кнопку ниже, чтобы перейти к генерации счета в @Ya\\_SellerBot.", reply_markup=builder.as_markup(), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"💰 <b>Продление ключа</b>\n\n🔑 Ключ: <b>{escape_html(key['display_name'])}</b>\nТариф: <b>{escape_html(tariff['name'])}</b>\nСумма к оплате: <b>{price_str}</b>\n\nНажмите кнопку ниже, чтобы перейти к генерации счета в @Ya_SellerBot.", reply_markup=builder.as_markup())
     await callback.answer()
 
 @router.callback_query(F.data.startswith('pay_crypto'))
@@ -83,10 +80,10 @@ async def pay_crypto_select_tariff(callback: CallbackQuery):
         order_id = callback.data.split(':')[1]
     tariffs = get_all_tariffs(include_hidden=False)
     if not tariffs:
-        await safe_edit_or_send(callback.message, '💰 *Оплата криптовалютой*\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '💰 <b>Оплата криптовалютой</b>\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb())
         await callback.answer()
         return
-    await safe_edit_or_send(callback.message, '💰 *Оплата криптовалютой*\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id, is_crypto=True), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '💰 <b>Оплата криптовалютой</b>\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id, is_crypto=True))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('crypto_pay:'))
@@ -115,12 +112,10 @@ async def pay_crypto_invoice(callback: CallbackQuery):
         await callback.answer('❌ Ошибка настройки крипто-платежей', show_alert=True)
         return
     crypto_url = build_crypto_payment_url(item_id=item_id, invoice_id=order_id, tariff_external_id=None, price_cents=tariff['price_cents'])
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from aiogram.types import InlineKeyboardButton
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text='💰 Перейти к оплате', url=crypto_url))
     builder.row(InlineKeyboardButton(text='⬅️ Назад', callback_data=f'pay_crypto:{order_id}'))
     price_usd = tariff['price_cents'] / 100
     price_str = f'${price_usd:g}'.replace('.', ',')
-    await safe_edit_or_send(callback.message, f"💰 *Оплата криптовалютой*\n\nТариф: *{tariff['name']}*\nСумма к оплате: *{price_str}*\n\nНажмите кнопку ниже, чтобы перейти к генерации счета в @Ya\\_SellerBot.", reply_markup=builder.as_markup(), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"💰 <b>Оплата криптовалютой</b>\n\nТариф: <b>{escape_html(tariff['name'])}</b>\nСумма к оплате: <b>{price_str}</b>\n\nНажмите кнопку ниже, чтобы перейти к генерации счета в @Ya_SellerBot.", reply_markup=builder.as_markup())
     await callback.answer()

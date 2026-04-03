@@ -14,7 +14,7 @@ from aiogram.filters import StateFilter
 
 from bot.states.admin_states import AdminStates
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,11 @@ async def show_trial_menu(callback: CallbackQuery):
     tariff_text = tariff_name if tariff_name else "_не задан_"
 
     text = (
-        "🎁 *Пробная подписка*\n\n"
+        "🎁 <b>Пробная подписка</b>\n\n"
         "Управление функцией пробного доступа для новых пользователей.\n\n"
-        f"📌 *Статус:* {escape_md(status_text)}\n"
-        f"📋 *Тариф:* {tariff_text}\n\n"
-        "❓ *Как работает:*\n"
+        f"📌 <b>Статус:</b> {escape_html(status_text)}\n"
+        f"📋 <b>Тариф:</b> {tariff_text}\n\n"
+        "❓ <b>Как работает:</b>\n"
         "• Если включено и тариф задан — кнопка «🎁 Пробная подписка» появляется на главной у пользователей, которые ещё не использовали пробный период.\n"
         "• При активации — пользователю выдаётся ключ с выбранным тарифом.\n"
         "• Каждый пользователь может активировать пробный период только один раз."
@@ -60,8 +60,7 @@ async def show_trial_menu(callback: CallbackQuery):
 
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=trial_settings_kb(enabled, tariff_name),
-        parse_mode="Markdown"
+        reply_markup=trial_settings_kb(enabled, tariff_name)
     )
     await callback.answer()
 
@@ -147,13 +146,12 @@ async def admin_trial_select_tariff(callback: CallbackQuery):
         return
 
     await safe_edit_or_send(callback.message, 
-        "📋 *Выбор тарифа для пробной подписки*\n\n"
+        "📋 <b>Выбор тарифа для пробной подписки</b>\n\n"
         "Выберите тариф, который будет выдаваться пользователям.\n"
         "Отображаются все тарифы, включая неактивные для покупки.\n\n"
         "🟢 — активный тариф  |  🔴 — неактивный тариф\n"
         "🔘 — текущий выбор",
-        reply_markup=trial_tariff_select_kb(available, selected_id),
-        parse_mode="Markdown"
+        reply_markup=trial_tariff_select_kb(available, selected_id)
     )
     await callback.answer()
 

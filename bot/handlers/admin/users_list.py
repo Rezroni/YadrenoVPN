@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from config import ADMIN_IDS
 from database.requests import get_users_stats, get_all_users_paginated, get_user_by_telegram_id, toggle_user_ban, get_user_vpn_keys, get_user_payments_stats, get_vpn_key_by_id, extend_vpn_key, create_vpn_key_admin, get_active_servers, get_all_tariffs, get_user_balance, get_user_referral_coefficient, add_to_balance, deduct_from_balance, set_user_referral_coefficient
 from bot.utils.admin import is_admin
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 from bot.handlers.admin.users_manage import _show_user_view
 from bot.states.admin_states import AdminStates
 from bot.keyboards.admin import users_menu_kb, users_list_kb, user_view_kb, user_ban_confirm_kb, key_view_kb, add_key_server_kb, add_key_inbound_kb, add_key_step_kb, add_key_confirm_kb, users_input_cancel_kb, key_action_cancel_kb, back_and_home_kb, home_only_kb
@@ -29,8 +29,8 @@ async def show_users_menu(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.users_menu)
     await state.update_data(users_filter='all', users_page=0)
     stats = get_users_stats()
-    text = f"👥 *Пользователи*\n\n📊 *Статистика:*\n👤 Всего: *{stats['total']}*\n✅ С активными ключами: *{stats['active']}*\n❌ Без активных ключей: *{stats['inactive']}*\n🆕 Никогда не покупали: *{stats['never_paid']}*\n🚫 Ключ истёк: *{stats['expired']}*"
-    await safe_edit_or_send(callback.message, text, reply_markup=users_menu_kb(stats), parse_mode='Markdown')
+    text = f"👥 <b>Пользователи</b>\n\n📊 <b>Статистика:</b>\n👤 Всего: <b>{stats['total']}</b>\n✅ С активными ключами: <b>{stats['active']}</b>\n❌ Без активных ключей: <b>{stats['inactive']}</b>\n🆕 Никогда не покупали: <b>{stats['never_paid']}</b>\n🚫 Ключ истёк: <b>{stats['expired']}</b>"
+    await safe_edit_or_send(callback.message, text, reply_markup=users_menu_kb(stats))
     await callback.answer()
 
 @router.callback_query(F.data == 'admin_users_list')
@@ -75,10 +75,10 @@ async def _show_users_page(callback: CallbackQuery, state: FSMContext, page: int
     from bot.keyboards.admin import USERS_FILTERS
     filter_name = USERS_FILTERS.get(filter_type, filter_type)
     if users:
-        text = f'👥 *Пользователи* — {filter_name}\n\nПоказано: {len(users)} из {total}\nСтраница {page + 1} из {total_pages}'
+        text = f'👥 <b>Пользователи</b> — {filter_name}\n\nПоказано: {len(users)} из {total}\nСтраница {page + 1} из {total_pages}'
     else:
-        text = f'👥 *Пользователи* — {filter_name}\n\n😕 Пользователей не найдено'
-    await safe_edit_or_send(callback.message, text, reply_markup=users_list_kb(users, page, total_pages, filter_type), parse_mode='Markdown')
+        text = f'👥 <b>Пользователи</b> — {filter_name}\n\n😕 Пользователей не найдено'
+    await safe_edit_or_send(callback.message, text, reply_markup=users_list_kb(users, page, total_pages, filter_type))
     await callback.answer()
 
 @router.callback_query(F.data == 'admin_users_select')
@@ -88,7 +88,7 @@ async def request_user_selection(callback: CallbackQuery, state: FSMContext):
         await callback.answer('⛔ Доступ запрещён', show_alert=True)
         return
     await state.set_state(AdminStates.waiting_user_id)
-    text = '🔍 *Поиск пользователя*\n\nОтправьте:\n• telegram\\_id (число)\n• @username\n• panel\\_email (email клиента из панели)'
+    text = '🔍 <b>Поиск пользователя</b>\n\nОтправьте:\n• telegram_id (число)\n• @username\n• panel_email (email клиента из панели)'
     
     reply_keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -104,7 +104,7 @@ async def request_user_selection(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
         
-    await callback.message.answer(text, reply_markup=reply_keyboard, parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, text, reply_markup=reply_keyboard, force_new=True)
     await callback.answer()
 
 @router.message(AdminStates.waiting_user_id, F.users_shared)
@@ -142,8 +142,8 @@ async def process_user_search_input(message: Message, state: FSMContext):
         from database.requests import get_users_stats
         from bot.keyboards.admin import users_menu_kb
         stats = get_users_stats()
-        text = f"👥 *Пользователи*\n\n📊 *Статистика:*\n👤 Всего: *{stats['total']}*\n✅ С активными ключами: *{stats['active']}*\n❌ Без активных ключей: *{stats['inactive']}*\n🆕 Никогда не покупали: *{stats['never_paid']}*\n🚫 Ключ истёк: *{stats['expired']}*"
-        await message.answer(text, reply_markup=users_menu_kb(stats), parse_mode='Markdown')
+        text = f"👥 <b>Пользователи</b>\n\n📊 <b>Статистика:</b>\n👤 Всего: <b>{stats['total']}</b>\n✅ С активными ключами: <b>{stats['active']}</b>\n❌ Без активных ключей: <b>{stats['inactive']}</b>\n🆕 Никогда не покупали: <b>{stats['never_paid']}</b>\n🚫 Ключ истёк: <b>{stats['expired']}</b>"
+        await safe_edit_or_send(message, text, reply_markup=users_menu_kb(stats), force_new=True)
         return
     from database.requests import get_user_by_username, get_user_by_panel_email
     from bot.utils.text import get_message_text_for_storage
@@ -163,7 +163,7 @@ async def process_user_search_input(message: Message, state: FSMContext):
         telegram_id = int(text)
         user = get_user_by_telegram_id(telegram_id)
         if not user:
-            await message.answer(f'❌ Пользователь с ID `{telegram_id}` не найден в базе', reply_markup=cancel_reply_kb, parse_mode='Markdown')
+            await safe_edit_or_send(message, f'❌ Пользователь с ID <code>{telegram_id}</code> не найден в базе', reply_markup=cancel_reply_kb, force_new=True)
             return
     elif text.startswith('@') or text.replace('_', '').isalnum():
         username = text.lstrip('@')
@@ -172,13 +172,13 @@ async def process_user_search_input(message: Message, state: FSMContext):
             # Пробуем найти по panel_email (email в панели 3X-UI)
             user = get_user_by_panel_email(text)
             if not user:
-                await message.answer(f'❌ Пользователь @{username} не найден в базе', reply_markup=cancel_reply_kb, parse_mode='Markdown')
+                await safe_edit_or_send(message, f'❌ Пользователь @{username} не найден в базе', reply_markup=cancel_reply_kb, force_new=True)
                 return
     else:
         # Произвольный текст — пробуем как panel_email
         user = get_user_by_panel_email(text)
         if not user:
-            await message.answer('❌ Введите telegram\\_id (число), @username или panel\\_email из панели', reply_markup=cancel_reply_kb, parse_mode='Markdown')
+            await safe_edit_or_send(message, '❌ Введите telegram_id (число), @username или panel_email из панели', reply_markup=cancel_reply_kb, force_new=True)
             return
             
     temp = await message.answer('⏳', reply_markup=ReplyKeyboardRemove())

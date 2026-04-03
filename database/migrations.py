@@ -28,7 +28,7 @@ def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
 
 
 # Текущая версия схемы БД
-LATEST_VERSION = 14
+LATEST_VERSION = 15
 
 
 def get_current_version() -> int:
@@ -904,6 +904,277 @@ def migration_14(conn: sqlite3.Connection) -> None:
     logger.info("Миграция v14 применена")
 
 
+def _convert_md_to_html(text: str) -> str:
+    """Конвертирует MarkdownV2 текст в HTML."""
+    import re
+    
+    # 1. Убираем экранирование спецсимволов MD2 (\. \! \( \) \- \= \| \{ \} \# \+ \> \~ \`)
+    text = re.sub(r'\\([_*\[\]()~`>#+\-=|{}.!\\])', r'\1', text)
+    
+    # 2. Конвертируем форматирование (в правильном порядке: сначала bold+italic)
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'<b><i>\1</i></b>', text)  # ***bold italic***
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)              # **bold**  
+    text = re.sub(r'\*(.+?)\*', r'<b>\1</b>', text)                   # *bold*
+    text = re.sub(r'_(.+?)_', r'<i>\1</i>', text)                     # _italic_
+    text = re.sub(r'~(.+?)~', r'<s>\1</s>', text)                     # ~strikethrough~
+    text = re.sub(r'__(.+?)__', r'<u>\1</u>', text)                   # __underline__
+    
+    # 3. Inline code: `code` → <code>code</code>
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    
+    # 4. Code blocks: ```\ncode\n``` → <pre>code</pre>
+    text = re.sub(r'```\n?(.*?)\n?```', r'<pre>\1</pre>', text, flags=re.DOTALL)
+    
+    # 5. Ссылки: [text](url) → <a href="url">text</a>
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    
+    return text
+
+
+def _is_default_text(text: str, md_default: str) -> bool:
+    """Проверяет, совпадает ли текст с дефолтным (с допуском на пробелы)."""
+    return text.strip() == md_default.strip()
+
+
+def _migrate_setting_text(conn, key: str, md_default: str, html_default: str) -> str:
+    """Мигрирует одну настройку из MD в HTML."""
+    import json as _json
+    
+    cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    if not row or not row['value']:
+        # Нет значения → ставим HTML-дефолт
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, html_default))
+        return 'default_set'
+    
+    current_val = row['value']
+    
+    # Пробуем распарсить JSON
+    try:
+        data = _json.loads(current_val)
+        if isinstance(data, dict) and 'text' in data:
+            text = data['text']
+            if _is_default_text(text, md_default):
+                data['text'] = html_default
+            else:
+                data['text'] = _convert_md_to_html(text)
+            new_val = _json.dumps(data, ensure_ascii=False)
+            conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, key))
+            return 'json_converted'
+    except (_json.JSONDecodeError, TypeError):
+        pass
+    
+    # Обычная строка
+    if _is_default_text(current_val, md_default):
+        conn.execute("UPDATE settings SET value = ? WHERE key = ?", (html_default, key))
+        return 'default_replaced'
+    else:
+        new_val = _convert_md_to_html(current_val)
+        conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, key))
+        return 'converted'
+
+
+def migration_15(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v15: Конвертация всех текстов из MarkdownV2 в HTML.
+    
+    Для каждого текстового ключа:
+    1. Если текст совпадает с дефолтным MarkdownV2 → заменяем на чистый HTML-дефолт
+    2. Если текст НЕ совпадает (пользователь изменил) → конвертируем MD → HTML автоматически
+    
+    Обрабатывает оба формата хранения: обычная строка и JSON {text, photo_file_id, ...}.
+    """
+    import json as _json
+    logger.info("Применение миграции v15 (MarkdownV2 → HTML)...")
+    
+    # ── 1. main_page_text ─────────────────────────────────────────────────────
+    md_main = (
+        "🔐 *Добро пожаловать в VPN\\-бот\\!*\n"
+        "Быстрый, безопасный и анонимный доступ к интернету\\.\n"
+        "Без логов, без ограничений, без проблем\\! 🚀\n"
+    )
+    html_main = (
+        "🔐 <b>Добро пожаловать в VPN-бот!</b>\n\n"
+        "Быстрый, безопасный и анонимный доступ к интернету.\n"
+        "Без логов, без ограничений, без проблем! 🚀"
+    )
+    result = _migrate_setting_text(conn, 'main_page_text', md_main, html_main)
+    logger.info(f"main_page_text: {result}")
+    
+    # ── 2. help_page_text ─────────────────────────────────────────────────────
+    md_help = (
+        "🔐 Этот бот предоставляет доступ к VPN\\-сервису\\.\n\n"
+        "*Как это работает:*\n"
+        "1\\. Купите ключ через раздел «Купить ключ»\n\n"
+        "2\\. Установите VPN\\-клиент для вашего устройства:\n\n"
+        "Hiddify или v2rayNG или V2Box\n"
+        "Подробная инструкция по настройке VPN👇 https://telegra\\.ph/Kak\\-nastroit\\-VPN\\-Gajd\\-za\\-2\\-minuty\\-01\\-23\n\n"
+        "3\\. Импортируйте ключ в приложение\n\n"
+        "4\\. Подключайтесь и наслаждайтесь\\! 🚀\n\n"
+        "\\-\\-\\-\n"
+        "Разработчик @plushkin\\_blog\n"
+        "\\-\\-\\-"
+    )
+    html_help = (
+        "🔐 Этот бот предоставляет доступ к VPN-сервису.\n\n"
+        "<b>Как это работает:</b>\n"
+        "1. Купите ключ через раздел «Купить ключ»\n\n"
+        "2. Установите VPN-клиент для вашего устройства:\n\n"
+        "Hiddify или v2rayNG или V2Box\n"
+        "Подробная инструкция по настройке VPN👇 https://telegra.ph/Kak-nastroit-VPN-Gajd-za-2-minuty-01-23\n\n"
+        "3. Импортируйте ключ в приложение\n\n"
+        "4. Подключайтесь и наслаждайтесь! 🚀\n\n"
+        "---\n"
+        "Разработчик @plushkin_blog\n"
+        "---"
+    )
+    result = _migrate_setting_text(conn, 'help_page_text', md_help, html_help)
+    logger.info(f"help_page_text: {result}")
+    
+    # ── 3. notification_text ──────────────────────────────────────────────────
+    # Может содержать старые теги {days}/{keyname} или новые %дней%/%имяключа%
+    md_notification = (
+        "⚠️ *Ваш VPN-ключ %имяключа% скоро истекает!*\n\n"
+        "Через %дней% дней закончится срок действия вашего ключа.\n\n"
+        "Продлите подписку, чтобы сохранить доступ к VPN без перерыва!"
+    )
+    html_notification = (
+        "⚠️ <b>Ваш VPN-ключ %имяключа% скоро истекает!</b>\n\n"
+        "Через %дней% дней закончится срок действия вашего ключа.\n\n"
+        "Продлите подписку, чтобы сохранить доступ к VPN без перерыва!"
+    )
+    result = _migrate_setting_text(conn, 'notification_text', md_notification, html_notification)
+    logger.info(f"notification_text: {result}")
+    
+    # ── 4. trial_page_text ────────────────────────────────────────────────────
+    md_trial = (
+        "🎁 *Пробная подписка*\n\n"
+        "Хотите попробовать наш VPN бесплатно?\n\n"
+        "Мы предлагаем пробный период, чтобы вы могли убедиться в качестве "
+        "и скорости нашего сервиса\\.\n\n"
+        "*Что входит в пробный доступ:*\n"
+        "• Полный доступ к VPN без ограничений по сайтам\n"
+        "• Высокая скорость соединения\n"
+        "• Несколько протоколов на выбор\n\n"
+        "Нажмите кнопку ниже, чтобы активировать пробный доступ прямо сейчас\!\n\n"
+        "_Пробный период предоставляется один раз на аккаунт\._"
+    )
+    html_trial = (
+        "🎁 <b>Пробная подписка</b>\n\n"
+        "Хотите попробовать наш VPN бесплатно?\n\n"
+        "Мы предлагаем пробный период, чтобы вы могли убедиться в качестве "
+        "и скорости нашего сервиса.\n\n"
+        "<b>Что входит в пробный доступ:</b>\n"
+        "• Полный доступ к VPN без ограничений по сайтам\n"
+        "• Высокая скорость соединения\n"
+        "• Несколько протоколов на выбор\n\n"
+        "Нажмите кнопку ниже, чтобы активировать пробный доступ прямо сейчас!\n\n"
+        "<i>Пробный период предоставляется один раз на аккаунт.</i>"
+    )
+    result = _migrate_setting_text(conn, 'trial_page_text', md_trial, html_trial)
+    logger.info(f"trial_page_text: {result}")
+    
+    # ── 5. prepayment_text ────────────────────────────────────────────────────
+    md_prepayment = (
+        "💳 *Купить ключ*\n\n"
+        "🔐 *Что вы получаете:*\n"
+        "• Доступ к нескольким серверам и протоколам\n"
+        "• 1 ключ \\= 1 устройство \\(одновременное подключение\\)\n"
+        "• Лимит трафика: до 1 ТБ в месяц \\(сброс каждые 30 дней\\)\n\n"
+        "⚠️ *Важно знать:*\n"
+        "• Средства не возвращаются — услуга считается оказанной в момент получения ключа\n"
+        "• Мы не даём никаких гарантий бесперебойной работы сервиса в будущем\n"
+        "• Мы не можем гарантировать, что данная технология останется рабочей\n\n"
+        "_Приобретая ключ, вы соглашаетесь с этими условиями\\._"
+    )
+    html_prepayment = (
+        "💳 <b>Купить ключ</b>\n\n"
+        "🔐 <b>Что вы получаете:</b>\n"
+        "• Доступ к нескольким серверам и протоколам\n"
+        "• 1 ключ = 1 устройство (одновременное подключение)\n"
+        "• Лимит трафика: до 1 ТБ в месяц (сброс каждые 30 дней)\n\n"
+        "⚠️ <b>Важно знать:</b>\n"
+        "• Средства не возвращаются — услуга считается оказанной в момент получения ключа\n"
+        "• Мы не даём никаких гарантий бесперебойной работы сервиса в будущем\n"
+        "• Мы не можем гарантировать, что данная технология останется рабочей\n\n"
+        "<i>Приобретая ключ, вы соглашаетесь с этими условиями.</i>"
+    )
+    result = _migrate_setting_text(conn, 'prepayment_text', md_prepayment, html_prepayment)
+    logger.info(f"prepayment_text: {result}")
+    
+    # ── 6. key_delivery_text ──────────────────────────────────────────────────
+    md_key_delivery = (
+        "✅ *Ваш VPN\\-ключ\\!*\n\n"
+        "%ключ%\n"
+        "☝️ Нажмите, чтобы скопировать\\.\n\n"
+        "📱 *Инструкция:*\n"
+        "1\\. Скопируйте ссылку или отсканируйте QR\\-код\\.\n"
+        "2\\. Импортируйте в свой клиент\\. Какие именно клиент подходит смотри в инструкции по кнопке ниже\\.\n"
+        "3\\. Нажмите подключиться\\!"
+    )
+    html_key_delivery = (
+        "✅ <b>Ваш VPN-ключ!</b>\n\n"
+        "%ключ%\n"
+        "☝️ Нажмите, чтобы скопировать.\n\n"
+        "📱 <b>Инструкция:</b>\n"
+        "1. Скопируйте ссылку или отсканируйте QR-код.\n"
+        "2. Импортируйте в свой клиент. Какие именно клиент подходит смотри в инструкции по кнопке ниже.\n"
+        "3. Нажмите подключиться!"
+    )
+    result = _migrate_setting_text(conn, 'key_delivery_text', md_key_delivery, html_key_delivery)
+    logger.info(f"key_delivery_text: {result}")
+    
+    # ── 7. traffic_notification_text ──────────────────────────────────────────
+    md_traffic = '⚠️ По ключу *{keyname}* осталось {percent}% трафика ({used} из {limit})'
+    html_traffic = '⚠️ По ключу <b>{keyname}</b> осталось {percent}% трафика ({used} из {limit})'
+    result = _migrate_setting_text(conn, 'traffic_notification_text', md_traffic, html_traffic)
+    logger.info(f"traffic_notification_text: {result}")
+    
+    # ── 8. referral_conditions_text ───────────────────────────────────────────
+    cursor = conn.execute("SELECT value FROM settings WHERE key = 'referral_conditions_text'")
+    row = cursor.fetchone()
+    if row and row['value'] and row['value'].strip():
+        current_val = row['value']
+        try:
+            data = _json.loads(current_val)
+            if isinstance(data, dict) and 'text' in data and data['text']:
+                data['text'] = _convert_md_to_html(data['text'])
+                new_val = _json.dumps(data, ensure_ascii=False)
+                conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, 'referral_conditions_text'))
+                logger.info("referral_conditions_text: json_converted")
+            else:
+                logger.info("referral_conditions_text: пустой JSON, пропуск")
+        except (_json.JSONDecodeError, TypeError):
+            new_val = _convert_md_to_html(current_val)
+            conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, 'referral_conditions_text'))
+            logger.info("referral_conditions_text: converted")
+    else:
+        logger.info("referral_conditions_text: пустой, пропуск")
+    
+    # ── 9. broadcast_message ──────────────────────────────────────────────────
+    cursor = conn.execute("SELECT value FROM settings WHERE key = 'broadcast_message'")
+    row = cursor.fetchone()
+    if row and row['value'] and row['value'].strip():
+        current_val = row['value']
+        try:
+            data = _json.loads(current_val)
+            if isinstance(data, dict) and 'text' in data and data['text']:
+                data['text'] = _convert_md_to_html(data['text'])
+                new_val = _json.dumps(data, ensure_ascii=False)
+                conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, 'broadcast_message'))
+                logger.info("broadcast_message: json_converted")
+            else:
+                logger.info("broadcast_message: пустой JSON, пропуск")
+        except (_json.JSONDecodeError, TypeError):
+            new_val = _convert_md_to_html(current_val)
+            conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new_val, 'broadcast_message'))
+            logger.info("broadcast_message: converted")
+    else:
+        logger.info("broadcast_message: пустой, пропуск")
+    
+    logger.info("Миграция v15 применена")
+
+
 MIGRATIONS = {
     1: migration_1,
     2: migration_2,
@@ -919,6 +1190,7 @@ MIGRATIONS = {
     12: migration_12,
     13: migration_13,
     14: migration_14,
+    15: migration_15,
 }
 
 

@@ -67,7 +67,7 @@ async def show_groups_list(callback: CallbackQuery, state: FSMContext):
         })
     
     text = (
-        "📂 *Группы тарифов*\n\n"
+        "📂 <b>Группы тарифов</b>\n\n"
         "Группы ограничивают доступ: ключи можно продлевать и переносить "
         "только в рамках своей группы.\n\n"
     )
@@ -80,13 +80,12 @@ async def show_groups_list(callback: CallbackQuery, state: FSMContext):
     
     for g in groups_info:
         is_default = " _(по умолчанию)_" if g['id'] == 1 else ""
-        text += f"\n📂 *{g['name']}*{is_default}\n"
+        text += f"\n📂 <b>{g['name']}</b>{is_default}\n"
         text += f"   Тарифов: {g['tariffs_count']} | Серверов: {g['servers_count']}\n"
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=groups_list_kb(groups),
-        parse_mode="Markdown"
+        reply_markup=groups_list_kb(groups)
     )
     await callback.answer()
 
@@ -105,12 +104,11 @@ async def group_add_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.group_add_name)
     
     sent = await safe_edit_or_send(callback.message, 
-        "📂 *Новая группа*\n\n"
+        "📂 <b>Новая группа</b>\n\n"
         "⚠️ После добавления второй группы у пользователей появится "
         "разделение тарифов и серверов по группам.\n\n"
         "Введите название группы (макс. 30 символов):",
-        reply_markup=back_and_home_kb("admin_groups"),
-        parse_mode="Markdown"
+        reply_markup=back_and_home_kb("admin_groups")
     )
     await state.update_data(add_group_chat_id=callback.message.chat.id, add_group_message_id=callback.message.message_id)
     await callback.answer()
@@ -126,9 +124,8 @@ async def group_add_name_handler(message: Message, state: FSMContext):
     name = get_message_text_for_storage(message, 'plain').strip()
     
     if not name or len(name) > 30:
-        await message.answer(
-            "⚠️ Название должно быть от 1 до 30 символов.",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            "⚠️ Название должно быть от 1 до 30 символов."
         )
         return
     
@@ -160,8 +157,8 @@ async def group_add_name_handler(message: Message, state: FSMContext):
         })
     
     text = (
-        f"✅ Группа *{name}* создана!\n\n"
-        "📂 *Группы тарифов*\n\n"
+        f"✅ Группа <b>{name}</b> создана!\n\n"
+        "📂 <b>Группы тарифов</b>\n\n"
         "Группы ограничивают доступ: ключи можно продлевать и переносить "
         "только в рамках своей группы.\n\n"
     )
@@ -174,7 +171,7 @@ async def group_add_name_handler(message: Message, state: FSMContext):
     
     for g in groups_info:
         is_default = " _(по умолчанию)_" if g['id'] == 1 else ""
-        text += f"\n📂 *{g['name']}*{is_default}\n"
+        text += f"\n📂 <b>{g['name']}</b>{is_default}\n"
         text += f"   Тарифов: {g['tariffs_count']} | Серверов: {g['servers_count']}\n"
     
     # Редактируем исходное сообщение с формой
@@ -185,15 +182,14 @@ async def group_add_name_handler(message: Message, state: FSMContext):
                 text,
                 chat_id=add_chat_id,
                 message_id=add_msg_id,
-                reply_markup=groups_list_kb(groups),
-                parse_mode="Markdown"
+                reply_markup=groups_list_kb(groups)
             )
         except Exception as e:
             logger.warning(f"Не удалось отредактировать сообщение: {e}")
-            await message.answer(text, reply_markup=groups_list_kb(groups), parse_mode="Markdown")
+            await safe_edit_or_send(message, text, reply_markup=groups_list_kb(groups), force_new=True)
     else:
         from bot.keyboards.admin import groups_list_kb
-        await message.answer(text, reply_markup=groups_list_kb(groups), parse_mode="Markdown")
+        await safe_edit_or_send(message, text, reply_markup=groups_list_kb(groups), force_new=True)
 
 
 # ============================================================================
@@ -220,28 +216,27 @@ async def group_view_handler(callback: CallbackQuery, state: FSMContext):
     is_default = " _(по умолчанию)_" if group_id == 1 else ""
     
     text = (
-        f"📂 *{group['name']}*{is_default}\n\n"
+        f"📂 <b>{group['name']}</b>{is_default}\n\n"
         f"🔢 Порядок: {group['sort_order']}\n"
         f"📋 Активных тарифов: {len(tariffs)}\n"
         f"🖥️ Активных серверов: {len(servers)}\n"
     )
     
     if tariffs:
-        text += "\n*Тарифы:*\n"
+        text += "\n<b>Тарифы:</b>\n"
         for t in tariffs:
             price = t['price_cents'] / 100
             price_str = f"{price:g}".replace('.', ',')
             text += f"  • {t['name']} — ${price_str}\n"
     
     if servers:
-        text += "\n*Серверы:*\n"
+        text += "\n<b>Серверы:</b>\n"
         for s in servers:
             text += f"  • {s['name']}\n"
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=group_view_kb(group_id),
-        parse_mode="Markdown"
+        reply_markup=group_view_kb(group_id)
     )
     await callback.answer()
 
@@ -264,11 +259,10 @@ async def group_edit_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(edit_group_id=group_id, edit_message_id=callback.message.message_id)
     
     await safe_edit_or_send(callback.message, 
-        f"✏️ *Переименование группы*\n\n"
-        f"Текущее название: *{group['name']}*\n\n"
+        f"✏️ <b>Переименование группы</b>\n\n"
+        f"Текущее название: <b>{group['name']}</b>\n\n"
         "Введите новое название (макс. 30 символов):",
-        reply_markup=back_and_home_kb(f"admin_group_view:{group_id}"),
-        parse_mode="Markdown"
+        reply_markup=back_and_home_kb(f"admin_group_view:{group_id}")
     )
     await callback.answer()
 
@@ -283,7 +277,7 @@ async def group_edit_name_handler(message: Message, state: FSMContext):
     name = get_message_text_for_storage(message, 'plain').strip()
     
     if not name or len(name) > 30:
-        await message.answer("⚠️ Название должно быть от 1 до 30 символов.")
+        await safe_edit_or_send(message, "⚠️ Название должно быть от 1 до 30 символов.")
         return
     
     data = await state.get_data()
@@ -292,7 +286,7 @@ async def group_edit_name_handler(message: Message, state: FSMContext):
     
     if not group_id:
         await state.clear()
-        await message.answer("❌ Ошибка состояния.")
+        await safe_edit_or_send(message, "❌ Ошибка состояния.")
         return
     
     # Удаляем сообщение пользователя
@@ -316,7 +310,7 @@ async def group_edit_name_handler(message: Message, state: FSMContext):
         
         text = (
             f"✅ Группа переименована!\n\n"
-            f"📂 *{group['name']}*{is_default}\n\n"
+            f"📂 <b>{group['name']}</b>{is_default}\n\n"
             f"🔢 Порядок: {group['sort_order']}\n"
             f"📋 Активных тарифов: {len(tariffs)}\n"
             f"🖥️ Активных серверов: {len(servers)}\n"
@@ -327,13 +321,12 @@ async def group_edit_name_handler(message: Message, state: FSMContext):
                 text,
                 chat_id=message.chat.id,
                 message_id=edit_msg_id,
-                reply_markup=group_view_kb(group_id),
-                parse_mode="Markdown"
+                reply_markup=group_view_kb(group_id)
             )
         except:
-            await message.answer(text, reply_markup=group_view_kb(group_id), parse_mode="Markdown")
+            await safe_edit_or_send(message, text, reply_markup=group_view_kb(group_id), force_new=True)
     else:
-        await message.answer(f"✅ Группа переименована в *{name}*", parse_mode="Markdown")
+        await safe_edit_or_send(message, f"✅ Группа переименована в <b>{name}</b>")
 
 
 # ============================================================================
@@ -362,7 +355,7 @@ async def group_delete_start(callback: CallbackQuery, state: FSMContext):
     servers = get_active_servers_by_group(group_id)
     
     text = (
-        f"⚠️ *Удаление группы «{group['name']}»*\n\n"
+        f"⚠️ <b>Удаление группы «{group['name']}»</b>\n\n"
         f"📋 Тарифов: {len(tariffs)}\n"
         f"🖥️ Серверов: {len(servers)}\n\n"
     )
@@ -374,8 +367,7 @@ async def group_delete_start(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=group_delete_confirm_kb(group_id),
-        parse_mode="Markdown"
+        reply_markup=group_delete_confirm_kb(group_id)
     )
     await callback.answer()
 

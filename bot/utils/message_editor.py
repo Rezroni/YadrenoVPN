@@ -83,15 +83,15 @@ def save_message_data(key: str, message: Message, allowed_types: Optional[List[s
     if message.animation:
         data['animation_file_id'] = message.animation.file_id
         # Для медиа используем caption
-        data['text'] = get_message_text_for_storage(message, 'markdown') if message.caption else ''
+        data['text'] = get_message_text_for_storage(message, 'html') if message.caption else ''
     elif message.video:
         data['video_file_id'] = message.video.file_id
-        data['text'] = get_message_text_for_storage(message, 'markdown') if message.caption else ''
+        data['text'] = get_message_text_for_storage(message, 'html') if message.caption else ''
     elif message.photo:
         data['photo_file_id'] = message.photo[-1].file_id
-        data['text'] = get_message_text_for_storage(message, 'markdown') if message.caption else ''
+        data['text'] = get_message_text_for_storage(message, 'html') if message.caption else ''
     elif message.text:
-        data['text'] = get_message_text_for_storage(message, 'markdown')
+        data['text'] = get_message_text_for_storage(message, 'html')
     
     # Сохраняем как JSON
     set_setting(key, json.dumps(data, ensure_ascii=False))
@@ -177,7 +177,7 @@ async def send_editor_message(
     """Универсальная отправка/редактирование сообщения из редактора.
     
     Единый контракт: все тексты из редактора хранятся в БД в формате
-    MarkdownV2 и отправляются ТОЛЬКО через эту функцию с parse_mode='MarkdownV2'.
+    HTML и отправляются ТОЛЬКО через эту функцию с parse_mode='HTML'.
     
     Внутри делегирует вызов в safe_edit_or_send() для обработки
     переходов текст↔медиа и ошибок Telegram API.
@@ -190,7 +190,7 @@ async def send_editor_message(
         reply_markup: Клавиатура
         text_override: Подготовленный текст (заменяет data['text']).
             Используется когда нужно подставить плейсхолдеры (%тарифы%, %ключ% и т.д.)
-            Важно: все динамические значения должны быть экранированы через escape_md2()
+            Важно: все динамические значения должны быть экранированы через escape_html()
             
     Returns:
         Объект Message после отправки/редактирования
@@ -206,7 +206,7 @@ async def send_editor_message(
     # Определяем текст
     text = text_override if text_override is not None else (data.get('text', '') or default_text)
     if not text:
-        text = '\\(пусто\\)'
+        text = '(пусто)'
     
     # Определяем медиа (приоритет: animation > video > photo)
     # safe_edit_or_send поддерживает только photo, для video/animation — фоллбэк на текст
@@ -216,15 +216,14 @@ async def send_editor_message(
     
     media_file_id = None
     if animation:
-        text = f"{text}\n\n🎞 _\\(к сообщению прикреплена GIF\\)_"
+        text = f"{text}\n\n🎞 <i>(к сообщению прикреплена GIF)</i>"
     elif video:
-        text = f"{text}\n\n🎬 _\\(к сообщению прикреплено видео\\)_"
+        text = f"{text}\n\n🎬 <i>(к сообщению прикреплено видео)</i>"
     elif photo:
         media_file_id = photo
     
     return await safe_edit_or_send(
         message, text,
         reply_markup=reply_markup,
-        parse_mode='MarkdownV2',
         photo=media_file_id,
     )

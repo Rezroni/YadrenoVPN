@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md
+from bot.utils.text import escape_html, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
@@ -87,9 +87,8 @@ async def finalize_payment_ui(message: Message, state: FSMContext, text: str, or
     else:
         logger.info('No key_id in order object.')
     logger.info(f'Result: is_draft={is_draft}')
-    logger.info(f'Result: is_draft={is_draft}')
     if is_draft:
-        await message.answer(text, parse_mode='Markdown')
+        await safe_edit_or_send(message, text, force_new=True)
         await start_new_key_config(message, state, order['order_id'], key_id)
     else:
         from bot.handlers.user.keys import show_key_details
@@ -104,10 +103,7 @@ async def renew_invoice_cancel_handler(callback: CallbackQuery):
     parts = callback.data.split(':')
     key_id = int(parts[1])
     telegram_id = callback.from_user.id
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
+
     key = get_key_details_for_user(key_id, telegram_id)
     if not key:
         await callback.answer('❌ Ключ не найден', show_alert=True)
@@ -119,7 +115,7 @@ async def renew_invoice_cancel_handler(callback: CallbackQuery):
     yookassa_qr_enabled = is_yookassa_qr_configured()
     
     if not crypto_configured and (not stars_enabled) and (not cards_enabled) and (not yookassa_qr_enabled):
-        await callback.message.answer('😔 Способы оплаты временно недоступны.', parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '😔 Способы оплаты временно недоступны.', force_new=True)
         return
 
     crypto_url = None
@@ -143,8 +139,9 @@ async def renew_invoice_cancel_handler(callback: CallbackQuery):
             if balance_cents > 0:
                 show_balance_button = True
 
-    await callback.message.answer(
-        f"💳 *Продление ключа*\n\n🔑 Ключ: *{key['display_name']}*\n\nВыберите способ оплаты:",
+    await safe_edit_or_send(
+        callback.message,
+        f"💳 <b>Продление ключа</b>\n\n🔑 Ключ: <b>{escape_html(key['display_name'])}</b>\n\nВыберите способ оплаты:",
         reply_markup=renew_payment_method_kb(
             key_id=key_id,
             crypto_url=crypto_url,
@@ -155,6 +152,6 @@ async def renew_invoice_cancel_handler(callback: CallbackQuery):
             yookassa_qr_enabled=yookassa_qr_enabled,
             show_balance_button=show_balance_button
         ),
-        parse_mode='Markdown'
+        force_new=True
     )
     await callback.answer()

@@ -6,66 +6,56 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def escape_html(text: str) -> str:
+    """Экранирование спецсимволов для HTML parse_mode."""
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def get_message_text_for_storage(
     message: Message,
-    text_type: Literal['markdown', 'plain'] = 'markdown'
+    text_type: Literal['html', 'plain'] = 'html'
 ) -> str:
     """Извлекает текст из сообщения для сохранения в БД.
     
-    Поддерживает как обычные текстовые сообщения (text/md_text),
-    так и медиа-сообщения (caption/md_caption).
+    Поддерживает как обычные текстовые сообщения (html_text/text),
+    так и медиа-сообщения (html_caption/caption).
+    
+    Args:
+        text_type: 'html' — тексты с форматированием (использует html_text/html_caption),
+                   'plain' — технические значения (URL, секреты, числа).
     """
-    if text_type == 'markdown':
-        # Приоритет: md_text → text → md_caption → caption
-        if message.md_text:
-            return message.md_text.strip()
+    if text_type == 'html':
+        # html_text сохраняет форматирование пользователя в HTML-тегах
+        if message.html_text:
+            return message.html_text.strip()
         if message.text:
             return message.text.strip()
-        if hasattr(message, 'md_caption') and message.md_caption:
-            return message.md_caption.strip()
+        if hasattr(message, 'html_caption') and message.html_caption:
+            return message.html_caption.strip()
         if message.caption:
             return message.caption.strip()
         return ""
-    else:
+    else:  # plain
         if message.text:
             return message.text.strip()
         if message.caption:
             return message.caption.strip()
         return ""
-
-
-def escape_md(text: str) -> str:
-    if not text:
-        return ""
-    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[").replace("]", "\\]")
-
-
-def escape_md2(text: str) -> str:
-    if not text:
-        return ""
-    chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    for char in chars:
-        text = text.replace(char, '\\' + char)
-    return text
-
-
-def escape_markdown_url(url: str) -> str:
-    if not url:
-        return url
-    url = url.replace('\\', '\\\\')
-    url = url.replace(')', '\\)')
-    return url
 
 
 async def safe_edit_or_send(
     message: Message,
     text: str = None,
     reply_markup=None,
-    parse_mode: Optional[str] = None,
     photo: Optional[Union[str, object]] = None,
-    disable_web_page_preview: Optional[bool] = None,
+    show_web_page_preview: bool = False,
+    force_new: bool = False,
 ) -> Message:
     """Универсальная функция редактирования/отправки сообщения.
+    
+    parse_mode='HTML' зашит внутри — вызывающий код не может передать другой режим.
     
     Автоматически определяет тип текущего сообщения и целевой формат,
     выбирая оптимальную стратегию:
@@ -83,20 +73,31 @@ async def safe_edit_or_send(
         message: Сообщение для редактирования
         text: Текст сообщения (или caption для медиа)
         reply_markup: Клавиатура
-        parse_mode: Режим парсинга (Markdown, HTML, MarkdownV2)
         photo: Фото (file_id, URL или InputFile). Если передано — отправляем медиа-сообщение
     """
     is_current_media = bool(message.photo or message.video or message.document or message.animation)
     want_media = photo is not None
     
-    link_preview = None
-    if disable_web_page_preview is not None:
-        link_preview = LinkPreviewOptions(is_disabled=disable_web_page_preview)
+    # Отключаем превью ссылок по умолчанию. Включаем только если show_web_page_preview=True
+    link_preview = LinkPreviewOptions(is_disabled=not show_web_page_preview)
     
+    # Если requested force_new, просто отправляем новое сообщение без удаления старого
+    if force_new:
+        if want_media:
+            return await message.answer_photo(
+                photo=photo, caption=text,
+                reply_markup=reply_markup, parse_mode='HTML'
+            )
+        else:
+            return await message.answer(
+                text=text, reply_markup=reply_markup, parse_mode='HTML',
+                link_preview_options=link_preview
+            )
+            
     try:
         if want_media and is_current_media:
             # Медиа → Медиа: редактируем media + caption
-            input_media = InputMediaPhoto(media=photo, caption=text, parse_mode=parse_mode)
+            input_media = InputMediaPhoto(media=photo, caption=text, parse_mode='HTML')
             result = await message.edit_media(media=input_media, reply_markup=reply_markup)
             return result
             
@@ -108,13 +109,13 @@ async def safe_edit_or_send(
                 pass
             return await message.answer_photo(
                 photo=photo, caption=text,
-                reply_markup=reply_markup, parse_mode=parse_mode
+                reply_markup=reply_markup, parse_mode='HTML'
             )
             
         elif not want_media and not is_current_media:
             # Текст → Текст: обычное редактирование
             return await message.edit_text(
-                text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                text=text, reply_markup=reply_markup, parse_mode='HTML',
                 link_preview_options=link_preview
             )
             
@@ -125,7 +126,7 @@ async def safe_edit_or_send(
             except Exception:
                 pass
             return await message.answer(
-                text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                text=text, reply_markup=reply_markup, parse_mode='HTML',
                 link_preview_options=link_preview
             )
             
@@ -148,12 +149,11 @@ async def safe_edit_or_send(
             if want_media:
                 return await message.answer_photo(
                     photo=photo, caption=text,
-                    reply_markup=reply_markup, parse_mode=parse_mode
+                    reply_markup=reply_markup, parse_mode='HTML'
                 )
             else:
                 return await message.answer(
-                    text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+                    text=text, reply_markup=reply_markup, parse_mode='HTML',
                     link_preview_options=link_preview
                 )
         raise
-

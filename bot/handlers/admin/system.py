@@ -63,17 +63,16 @@ async def show_bot_settings(callback: CallbackQuery, state: FSMContext):
     github_status = "✅ Настроен" if GITHUB_REPO_URL else "❌ Не настроен"
     
     text = (
-        "⚙️ *Настройки бота*\n\n"
-        f"📌 Версия: `{commit}`\n"
-        f"🌿 Ветка: `{branch}`\n"
+        "⚙️ <b>Настройки бота</b>\n\n"
+        f"📌 Версия: <code>{commit}</code>\n"
+        f"🌿 Ветка: <code>{branch}</code>\n"
         f"🔗 GitHub: {github_status}\n\n"
         "Выберите действие:"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=bot_settings_kb(),
-        parse_mode="Markdown"
+        reply_markup=bot_settings_kb()
     )
     await callback.answer()
 
@@ -97,27 +96,25 @@ async def admin_update_cmd(message: Message, state: FSMContext):
     if current_remote != GITHUB_REPO_URL and GITHUB_REPO_URL:
         set_remote_url(GITHUB_REPO_URL)
         
-    await message.answer(
-        "🔄 *Экстренное обновление...*\n\n"
-        "Загружаю изменения с GitHub...",
-        parse_mode="Markdown"
+    await safe_edit_or_send(message,
+        "🔄 <b>Экстренное обновление...</b>\n\n"
+        "Загружаю изменения с GitHub..."
     )
     
     success, log_message = pull_updates()
     
     if not success:
-        await message.answer(
-            f"❌ *Ошибка обновления*\n\n{log_message}",
-            parse_mode="Markdown"
+        await safe_edit_or_send(message,
+            f"❌ <b>Ошибка обновления</b>\n\n{log_message}"
         )
         return
         
     logger.info(f"🔄 Бот экстренно обновлён администратором {message.from_user.id} через команду /update")
     
-    await message.answer(
-        f"✅ *Обновление завершено!*\n\n{log_message}\n\n"
+    await safe_edit_or_send(message,
+        f"✅ <b>Обновление завершено!</b>\n\n{log_message}\n\n"
         "🔄 Перезапуск бота через 2 секунды...",
-        parse_mode="Markdown"
+        force_new=True
     )
     
     await state.clear()
@@ -139,11 +136,10 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     # Проверяем настроен ли GitHub
     if not GITHUB_REPO_URL:
         await safe_edit_or_send(callback.message, 
-            "❌ *GitHub не настроен*\n\n"
-            "Укажите URL репозитория в файле `config.py`:\n"
-            "`GITHUB_REPO_URL = \"https://github.com/user/repo.git\"`",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
+            "❌ <b>GitHub не настроен</b>\n\n"
+            "Укажите URL репозитория в файле <code>config.py</code>:\n"
+            "<code>GITHUB_REPO_URL = \"https://github.com/user/repo.git\"</code>",
+            reply_markup=back_and_home_kb("admin_bot_settings")
         )
         await callback.answer()
         return
@@ -155,9 +151,8 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     
     # Показываем сообщение о проверке
     await safe_edit_or_send(callback.message, 
-        "🔍 *Проверка обновлений...*\n\n"
-        "Подключаюсь к GitHub...",
-        parse_mode="Markdown"
+        "🔍 <b>Проверка обновлений...</b>\n\n"
+        "Подключаюсь к GitHub..."
     )
     
     # Проверяем наличие обновлений
@@ -165,9 +160,8 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     
     if not success:
         await safe_edit_or_send(callback.message, 
-            f"❌ *Ошибка проверки*\n\n{log_text}",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
+            f"❌ <b>Ошибка проверки</b>\n\n{log_text}",
+            reply_markup=back_and_home_kb("admin_bot_settings")
         )
         await callback.answer()
         return
@@ -184,9 +178,9 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     previous_commits = get_previous_commits_info(5, target_rev)
     
     # Формируем текст с коммитами
-    commits_text = f"🔹 *Последний коммит:*\n```\n{last_commit}\n```\n"
+    commits_text = f"🔹 <b>Последний коммит:</b>\n``<code>\n{last_commit}\n</code>``\n"
     if previous_commits != "Нет предыдущих коммитов":
-         commits_text += f"\n🔸 *Предыдущие 5 коммитов:*\n```\n{previous_commits}\n```"
+         commits_text += f"\n🔸 <b>Предыдущие 5 коммитов:</b>\n``<code>\n{previous_commits}\n</code>``"
     
     # Сохраняем данные о блокирующем коммите в FSM state
     await state.update_data(
@@ -197,11 +191,10 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     # Если обновлений нет
     if commits_behind == 0:
         await safe_edit_or_send(callback.message, 
-            "✅ *Обновление не требуется, у вас последняя версия*\n\n"
-            f"Текущая версия: `{commit_hash}`\n\n"
+            "✅ <b>Обновление не требуется, у вас последняя версия</b>\n\n"
+            f"Текущая версия: <code>{commit_hash}</code>\n\n"
             f"{commits_text}",
-            reply_markup=update_confirm_kb(has_updates=False),
-            parse_mode="Markdown"
+            reply_markup=update_confirm_kb(has_updates=False)
         )
     elif has_blocking and blocking_commit:
         # Есть блокирующее обновление — показываем предупреждение
@@ -210,39 +203,36 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
         blocking_hash = blocking_commit['hash'][:8]
         
         await safe_edit_or_send(callback.message, 
-            f"⚠️ *Блокирующее обновление!*\n\n"
-            f"📦 *Доступно обновлений:* {commits_behind}\n"
-            f"Текущая версия: `{commit_hash}`\n\n"
-            f"🚫 Среди обновлений найден *блокирующий коммит* `{blocking_hash}`:\n"
-            f"```\n{blocking_msg}\n```\n\n"
-            f"Будет установлен *только этот коммит*. "
+            f"⚠️ <b>Блокирующее обновление!</b>\n\n"
+            f"📦 <b>Доступно обновлений:</b> {commits_behind}\n"
+            f"Текущая версия: <code>{commit_hash}</code>\n\n"
+            f"🚫 Среди обновлений найден <b>блокирующий коммит</b> <code>{blocking_hash}</code>:\n"
+            f"``<code>\n{blocking_msg}\n</code>``\n\n"
+            f"Будет установлен <b>только этот коммит</b>. "
             f"После перезапуска вам потребуется выполнить требуемые действия, "
             f"прежде чем обновляться дальше.\n\n"
             f"{commits_text}",
-            reply_markup=update_confirm_kb(has_updates=True, has_blocking=True),
-            parse_mode="Markdown"
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=True)
         )
     elif is_beta_only:
         # Только бета-обновления
         await safe_edit_or_send(callback.message, 
-            f"🧪 *Доступна бета-версия!*\n\n"
-            f"📦 *Доступно бета-коммитов:* {commits_behind}\n"
-            f"Текущая версия: `{commit_hash}`\n\n"
+            f"🧪 <b>Доступна бета-версия!</b>\n\n"
+            f"📦 <b>Доступно бета-коммитов:</b> {commits_behind}\n"
+            f"Текущая версия: <code>{commit_hash}</code>\n\n"
             f"{commits_text}\n\n"
             "⚠️ Это тестовая версия. Устанавливайте на свой страх и риск.",
-            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=True),
-            parse_mode="Markdown"
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=True)
         )
     else:
         # Есть обычные обновления
         await safe_edit_or_send(callback.message, 
-            f"📦 *Доступно обновлений:* {commits_behind}\n\n"
-            f"Текущая версия: `{commit_hash}`\n\n"
+            f"📦 <b>Доступно обновлений:</b> {commits_behind}\n\n"
+            f"Текущая версия: <code>{commit_hash}</code>\n\n"
             f"{commits_text}\n\n"
             "⚠️ После обновления бот автоматически перезапустится.\n"
             "Это займёт несколько секунд.",
-            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=False),
-            parse_mode="Markdown"
+            reply_markup=update_confirm_kb(has_updates=True, has_blocking=False, is_beta_only=False)
         )
     
     await callback.answer()
@@ -268,27 +258,24 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
     if has_blocking and blocking_commit:
         # Блокирующее обновление — обновляем до конкретного коммита
         await safe_edit_or_send(callback.message, 
-            "🔄 *Блокирующее обновление...*\n\n"
-            f"Обновляю до коммита `{blocking_commit['hash'][:8]}`...",
-            parse_mode="Markdown"
+            "🔄 <b>Блокирующее обновление...</b>\n\n"
+            f"Обновляю до коммита <code>{blocking_commit['hash'][:8]}</code>..."
         )
         
         success, message = pull_to_commit(blocking_commit['hash'])
     else:
         # Обычное обновление — git pull
         await safe_edit_or_send(callback.message, 
-            "🔄 *Обновление...*\n\n"
-            "Загружаю изменения с GitHub...",
-            parse_mode="Markdown"
+            "🔄 <b>Обновление...</b>\n\n"
+            "Загружаю изменения с GitHub..."
         )
         
         success, message = pull_updates()
     
     if not success:
         await safe_edit_or_send(callback.message, 
-            f"❌ *Ошибка обновления*\n\n{message}",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
+            f"❌ <b>Ошибка обновления</b>\n\n{message}",
+            reply_markup=back_and_home_kb("admin_bot_settings")
         )
         await callback.answer()
         return
@@ -298,16 +285,14 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
     
     if has_blocking:
         await safe_edit_or_send(callback.message, 
-            f"✅ *Блокирующее обновление завершено!*\n\n{message}\n\n"
+            f"✅ <b>Блокирующее обновление завершено!</b>\n\n{message}\n\n"
             "⚠️ После перезапуска выполните требуемые действия перед следующим обновлением.\n\n"
-            "🔄 Перезапуск бота через 2 секунды...",
-            parse_mode="Markdown"
+            "🔄 Перезапуск бота через 2 секунды..."
         )
     else:
         await safe_edit_or_send(callback.message, 
-            f"✅ *Обновление завершено!*\n\n{message}\n\n"
-            "🔄 Перезапуск бота через 2 секунды...",
-            parse_mode="Markdown"
+            f"✅ <b>Обновление завершено!</b>\n\n{message}\n\n"
+            "🔄 Перезапуск бота через 2 секунды..."
         )
     
     await callback.answer("Бот перезапускается...", show_alert=True)
@@ -333,22 +318,20 @@ async def show_force_overwrite(callback: CallbackQuery, state: FSMContext):
     # Проверяем настроен ли GitHub
     if not GITHUB_REPO_URL:
         await safe_edit_or_send(callback.message, 
-            "❌ *GitHub не настроен*\n\n"
-            "Укажите URL репозитория в файле `config.py`:\n"
-            "`GITHUB_REPO_URL = \"https://github.com/user/repo.git\"`",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
+            "❌ <b>GitHub не настроен</b>\n\n"
+            "Укажите URL репозитория в файле <code>config.py</code>:\n"
+            "<code>GITHUB_REPO_URL = \"https://github.com/user/repo.git\"</code>",
+            reply_markup=back_and_home_kb("admin_bot_settings")
         )
         await callback.answer()
         return
         
     await safe_edit_or_send(callback.message, 
-        "⚠️ *ПРИНУДИТЕЛЬНАЯ ПЕРЕЗАПИСЬ*\n\n"
-        f"Все файлы бота (кроме конфигурации и баз данных) будут перезаписаны оригинальными файлами из репозитория:\n`{GITHUB_REPO_URL}`\n\n"
+        "⚠️ <b>ПРИНУДИТЕЛЬНАЯ ПЕРЕЗАПИСЬ</b>\n\n"
+        f"Все файлы бота (кроме конфигурации и баз данных) будут перезаписаны оригинальными файлами из репозитория:\n<code>{GITHUB_REPO_URL}</code>\n\n"
         "🛑 *Внимание: Все ваши локальные изменения в коде будут безвозвратно потеряны!*\n\n"
         "Вы действительно хотите продолжить?",
-        reply_markup=force_overwrite_confirm_kb(),
-        parse_mode="Markdown"
+        reply_markup=force_overwrite_confirm_kb()
     )
     await callback.answer()
 
@@ -366,9 +349,8 @@ async def force_overwrite_confirmed(callback: CallbackQuery, state: FSMContext):
         set_remote_url(GITHUB_REPO_URL)
     
     await safe_edit_or_send(callback.message, 
-        "🔄 *Принудительная перезапись...*\n\n"
-        "Связываюсь с репозиторием и перезаписываю файлы. Пожалуйста, подождите...",
-        parse_mode="Markdown"
+        "🔄 <b>Принудительная перезапись...</b>\n\n"
+        "Связываюсь с репозиторием и перезаписываю файлы. Пожалуйста, подождите..."
     )
     
     # Выполняем принудительный git fetch и reset
@@ -376,9 +358,8 @@ async def force_overwrite_confirmed(callback: CallbackQuery, state: FSMContext):
     
     if not success:
         await safe_edit_or_send(callback.message, 
-            f"❌ *Ошибка перезаписи*\n\n{message}",
-            reply_markup=back_and_home_kb("admin_bot_settings"),
-            parse_mode="Markdown"
+            f"❌ <b>Ошибка перезаписи</b>\n\n{message}",
+            reply_markup=back_and_home_kb("admin_bot_settings")
         )
         await callback.answer()
         return
@@ -386,9 +367,8 @@ async def force_overwrite_confirmed(callback: CallbackQuery, state: FSMContext):
     logger.info(f"🔄 Бот принудительно перезаписан администратором {callback.from_user.id}")
     
     await safe_edit_or_send(callback.message, 
-        f"✅ *Успешно!*\n\n{message}\n\n"
-        "🔄 Перезапуск бота через 2 секунды...",
-        parse_mode="Markdown"
+        f"✅ <b>Успешно!</b>\n\n{message}\n\n"
+        "🔄 Перезапуск бота через 2 секунды..."
     )
     await callback.answer("Бот перезапускается...", show_alert=True)
     
@@ -431,10 +411,9 @@ async def edit_texts_menu(callback: CallbackQuery, state: FSMContext):
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_bot_settings"))
     
     await safe_edit_or_send(callback.message, 
-        "✏️ *Редактирование текстов*\n\n"
+        "✏️ <b>Редактирование текстов</b>\n\n"
         "Выберите, что хотите изменить:",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        reply_markup=builder.as_markup()
     )
     await callback.answer()
 
@@ -465,17 +444,17 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     # Тексты справки для каждого ключа
     help_texts = {
         'main_page_text': (
-            "📝 *Справка: Текст главной страницы*\n\n"
+            "📝 <b>Справка: Текст главной страницы</b>\n\n"
             "Поддерживается MarkdownV2 форматирование.\n\n"
             "Переменные:\n"
-            "• `%тарифы%` — список тарифов с ценами\n"
-            "• `%без_тарифов%` — не добавлять тарифы"
+            "• <code>%тарифы%</code> — список тарифов с ценами\n"
+            "• <code>%без_тарифов%</code> — не добавлять тарифы"
         ),
         'key_delivery_text': (
-            "📝 *Справка: Текст выдачи ключа*\n\n"
+            "📝 <b>Справка: Текст выдачи ключа</b>\n\n"
             "Формат: **Только текст** (без фото).\n\n"
             "Переменные:\n"
-            "• `%ключ%` — вместо этого тега будет подставлен блок с ссылкой на ключ."
+            "• <code>%ключ%</code> — вместо этого тега будет подставлен блок с ссылкой на ключ."
         ),
     }
     
@@ -548,12 +527,11 @@ async def edit_link_menu(callback: CallbackQuery, state: FSMContext):
     ))
     
     await safe_edit_or_send(callback.message, 
-        f"🔗 *Редактирование: {titles[link_type]}*\n\n"
-        f"📍 *Ссылка:* `{current_url}`\n"
-        f"🏷 *Название кнопки:* {button_name}\n"
-        f"👀 *Статус:* {hidden_status}",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        f"🔗 <b>Редактирование: {titles[link_type]}</b>\n\n"
+        f"📍 <b>Ссылка:</b> <code>{current_url}</code>\n"
+        f"🏷 <b>Название кнопки:</b> {button_name}\n"
+        f"👀 <b>Статус:</b> {hidden_status}",
+        reply_markup=builder.as_markup()
     )
     await callback.answer()
 
@@ -586,11 +564,10 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(editing_key=link_key, return_to=f"edit_link:{link_type}", editing_message=callback.message)
     
     await safe_edit_or_send(callback.message, 
-        f"🔗 *Изменение ссылки: {titles[link_type]}*\n\n"
-        f"📜 *Текущая ссылка:*\n`{current_url}`\n\n"
+        f"🔗 <b>Изменение ссылки: {titles[link_type]}</b>\n\n"
+        f"📜 <b>Текущая ссылка:</b>\n<code>{current_url}</code>\n\n"
         f"👇 Отправьте новую ссылку (должна начинаться с http:// или https://):",
-        reply_markup=cancel_kb(f"edit_link:{link_type}"),
-        parse_mode="Markdown"
+        reply_markup=cancel_kb(f"edit_link:{link_type}")
     )
     await callback.answer()
 
@@ -612,19 +589,18 @@ async def edit_link_url_save(message: Message, state: FSMContext):
     
     if not key:
         await state.clear()
-        await message.answer("❌ Ошибка состояния.")
+        await safe_edit_or_send(message, "❌ Ошибка состояния.", force_new=True)
         return
     
     new_value = get_message_text_for_storage(message, 'plain')
     
     # Валидация URL
     if not new_value.startswith(('http://', 'https://')):
-        await message.answer(
-            "❌ *Ошибка:* Ссылка должна начинаться с `http://` или `https://`\n\n"
-            f"Вы ввели: `{new_value}`\n\n"
+        await safe_edit_or_send(message,
+            "❌ <b>Ошибка:</b> Ссылка должна начинаться с <code>http://</code> или <code>https://</code>\n\n"
+            f"Вы ввели: <code>{new_value}</code>\n\n"
             "Попробуйте ещё раз или нажмите Отмена.",
-            reply_markup=cancel_kb(return_to),
-            parse_mode="Markdown"
+            reply_markup=cancel_kb(return_to)
         )
         return
     
@@ -641,21 +617,20 @@ async def edit_link_url_save(message: Message, state: FSMContext):
     if editing_message:
         try:
             await safe_edit_or_send(editing_message,
-                f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
-                reply_markup=back_and_home_kb(return_to),
-                parse_mode="Markdown"
+                f"✅ <b>Ссылка сохранена!</b>\n\n<code>{new_value}</code>",
+                reply_markup=back_and_home_kb(return_to)
             )
         except Exception:
-            await message.answer(
-                f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
+            await safe_edit_or_send(message,
+                f"✅ <b>Ссылка сохранена!</b>\n\n<code>{new_value}</code>",
                 reply_markup=back_and_home_kb(return_to),
-                parse_mode="Markdown"
+                force_new=True
             )
     else:
-        await message.answer(
-            f"✅ *Ссылка сохранена!*\n\n`{new_value}`",
+        await safe_edit_or_send(message,
+            f"✅ <b>Ссылка сохранена!</b>\n\n<code>{new_value}</code>",
             reply_markup=back_and_home_kb(return_to),
-            parse_mode="Markdown"
+            force_new=True
         )
 
 
@@ -711,11 +686,10 @@ async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(editing_name_key=name_key, link_type=link_type)
     
     await safe_edit_or_send(callback.message, 
-        f"✏️ *Изменение названия кнопки: {titles[link_type]}*\n\n"
-        f"🏷 *Текущее название:* {current_name}\n\n"
+        f"✏️ <b>Изменение названия кнопки: {titles[link_type]}</b>\n\n"
+        f"🏷 <b>Текущее название:</b> {current_name}\n\n"
         f"👇 Отправьте новое название для кнопки (максимум 30 символов):",
-        reply_markup=cancel_kb(f"edit_link:{link_type}"),
-        parse_mode="Markdown"
+        reply_markup=cancel_kb(f"edit_link:{link_type}")
     )
     await callback.answer()
 
@@ -732,7 +706,7 @@ async def edit_link_name_save(message: Message, state: FSMContext):
     
     if not name_key:
         await state.clear()
-        await message.answer("❌ Ошибка состояния.")
+        await safe_edit_or_send(message, "❌ Ошибка состояния.", force_new=True)
         return
     
     from bot.utils.text import get_message_text_for_storage
@@ -740,21 +714,20 @@ async def edit_link_name_save(message: Message, state: FSMContext):
     new_name = get_message_text_for_storage(message, 'plain')[:30]
     
     if len(new_name) < 1:
-        await message.answer(
-            "❌ *Название не может быть пустым*\n\n"
+        await safe_edit_or_send(message,
+            "❌ <b>Название не может быть пустым</b>\n\n"
             "Попробуйте ещё раз или нажмите Отмена.",
-            reply_markup=back_and_home_kb(f"edit_link:{link_type}" if link_type else "admin_edit_texts"),
-            parse_mode="Markdown"
+            reply_markup=back_and_home_kb(f"edit_link:{link_type}" if link_type else "admin_edit_texts")
         )
         return
     
     set_setting(name_key, new_name)
     await state.clear()
     
-    await message.answer(
-        f"✅ *Название сохранено!*\n\n{new_name}",
+    await safe_edit_or_send(message,
+        f"✅ <b>Название сохранено!</b>\n\n{new_name}",
         reply_markup=back_and_home_kb(f"edit_link:{link_type}" if link_type else "admin_edit_texts"),
-        parse_mode="Markdown"
+        force_new=True
     )
 
 
@@ -772,12 +745,11 @@ async def show_stop_bot_confirm(callback: CallbackQuery, state: FSMContext):
         return
     
     await safe_edit_or_send(callback.message, 
-        "🛑 *Остановка бота*\n\n"
+        "🛑 <b>Остановка бота</b>\n\n"
         "Вы уверены, что хотите остановить бот?\n\n"
         "⚠️ Бот перестанет отвечать на сообщения пользователей "
         "до следующего ручного запуска.",
-        reply_markup=stop_bot_confirm_kb(),
-        parse_mode="Markdown"
+        reply_markup=stop_bot_confirm_kb()
     )
     await callback.answer()
 
@@ -790,9 +762,8 @@ async def stop_bot_confirmed(callback: CallbackQuery, state: FSMContext):
         return
     
     await safe_edit_or_send(callback.message, 
-        "🛑 *Бот останавливается...*\n\n"
-        "Спасибо за использование!",
-        parse_mode="Markdown"
+        "🛑 <b>Бот останавливается...</b>\n\n"
+        "Спасибо за использование!"
     )
     await callback.answer("Бот останавливается...", show_alert=True)
     
@@ -817,10 +788,9 @@ async def show_logs_menu(callback: CallbackQuery, state: FSMContext):
         return
         
     await safe_edit_or_send(callback.message, 
-        "📥 *Скачивание логов*\n\n"
+        "📥 <b>Скачивание логов</b>\n\n"
         "Выберите какие логи хотите скачать:",
-        reply_markup=admin_logs_menu_kb(),
-        parse_mode="Markdown"
+        reply_markup=admin_logs_menu_kb()
     )
     await callback.answer()
 
@@ -905,10 +875,9 @@ async def confirm_clear_logs(callback: CallbackQuery, state: FSMContext):
     builder.row(back_button("admin_logs_menu"))
     
     await safe_edit_or_send(callback.message,
-        "🧹 *Очистка логов*\n\n"
-        "Вы уверены, что хотите полностью стереть старые файлы логов и очистить текущие `bot.log` и `errors.log`?\n"
+        "🧹 <b>Очистка логов</b>\n\n"
+        "Вы уверены, что хотите полностью стереть старые файлы логов и очистить текущие <code>bot.log</code> и <code>errors.log</code>?\n"
         "Это безвозвратное действие.",
-        parse_mode="Markdown",
         reply_markup=builder.as_markup()
     )
     await callback.answer()

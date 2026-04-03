@@ -11,7 +11,7 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def show_trial_subscription(callback: CallbackQuery):
     await send_editor_message(
         callback.message,
         key='trial_page_text',
-        default_text='🎁 *Пробная подписка*',
+        default_text='🎁 <b>Пробная подписка</b>',
         reply_markup=trial_sub_kb(),
     )
     await callback.answer()
@@ -66,7 +66,7 @@ async def activate_trial_subscription(callback: CallbackQuery, state: FSMContext
     (user, _) = get_or_create_user(user_id, callback.from_user.username)
     internal_user_id = user['id']
     mark_trial_used(internal_user_id)
-    logger.info(f'Пользователь {user_id} активировал пробный период (tарифf ID={tariff_id})')
+    logger.info(f'Пользователь {user_id} активировал пробный период (тариф ID={tariff_id})')
     duration_days = tariff['duration_days']
     traffic_limit_bytes = (tariff.get('traffic_limit_gb', 0) or 0) * 1024 ** 3
     key_id = create_initial_vpn_key(internal_user_id, tariff_id, duration_days, traffic_limit=traffic_limit_bytes)

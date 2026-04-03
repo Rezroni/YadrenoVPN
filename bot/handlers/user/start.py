@@ -11,10 +11,9 @@ from config import ADMIN_IDS
 from database.requests import get_or_create_user, is_user_banned, get_all_servers, get_setting, is_referral_enabled, get_user_by_referral_code, set_user_referrer
 from bot.keyboards.user import main_menu_kb
 from bot.states.user_states import RenameKey, ReplaceKey
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 
 logger = logging.getLogger(__name__)
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -25,10 +24,10 @@ def get_welcome_text(is_admin: bool=False) -> tuple:
         Кортеж (text, photo_file_id) — текст и опциональное фото
     """
     from database.requests import get_all_tariffs, get_setting, is_crypto_configured, is_stars_enabled, is_cards_enabled, is_yookassa_qr_configured
-    from bot.utils.text import escape_md2
+    from bot.utils.text import escape_html
     from bot.utils.message_editor import get_message_data
-    welcome_data = get_message_data('main_page_text', '🔐 *Добро пожаловать в VPN\\-бот\\!*')
-    welcome_text = welcome_data.get('text', '🔐 *Добро пожаловать в VPN\\-бот\\!*')
+    welcome_data = get_message_data('main_page_text', '🔐 <b>Добро пожаловать в VPN-бот!</b>')
+    welcome_text = welcome_data.get('text', '🔐 <b>Добро пожаловать в VPN-бот!</b>')
     photo_file_id = welcome_data.get('photo_file_id')
     crypto_enabled = is_crypto_configured()
     stars_enabled = is_stars_enabled()
@@ -37,22 +36,22 @@ def get_welcome_text(is_admin: bool=False) -> tuple:
     tariffs = get_all_tariffs()
     tariff_lines = []
     if tariffs:
-        tariff_lines.append('📋 *Тарифы:*')
+        tariff_lines.append('📋 <b>Тарифы:</b>')
         for tariff in tariffs:
             prices = []
             if crypto_enabled:
                 price_usd = tariff['price_cents'] / 100
                 price_str = f'{price_usd:g}'.replace('.', ',')
-                prices.append(f'${escape_md2(price_str)}')
+                prices.append(f'${escape_html(price_str)}')
             if stars_enabled:
                 prices.append(f"{tariff['price_stars']} ⭐")
             if (cards_enabled or yookassa_qr_enabled) and tariff.get('price_rub', 0) > 0:
                 prices.append(f"{int(tariff['price_rub'])} ₽")
-            price_display = ' \\/ '.join(prices) if prices else 'Цена не установлена'
-            tariff_lines.append(f"• {escape_md2(tariff['name'])} — {price_display}")
+            price_display = ' / '.join(prices) if prices else 'Цена не установлена'
+            tariff_lines.append(f"• {escape_html(tariff['name'])} — {price_display}")
     tariff_text = '\n'.join(tariff_lines)
-    if '%без\\_тарифов%' in welcome_text:
-        return (welcome_text.replace('%без\\_тарифов%', ''), photo_file_id)
+    if '%без_тарифов%' in welcome_text:
+        return (welcome_text.replace('%без_тарифов%', ''), photo_file_id)
     if '%тарифы%' not in welcome_text:
         welcome_text = f'{welcome_text}\n\n%тарифы%'
     return (welcome_text.replace('%тарифы%', tariff_text), photo_file_id)
@@ -75,7 +74,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
 
     (user, is_new) = get_or_create_user(user_id, username)
     if user.get('is_banned'):
-        await message.answer('⛔ *Доступ заблокирован*\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', parse_mode='Markdown')
+        await safe_edit_or_send(message, '⛔ <b>Доступ заблокирован</b>\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', force_new=True)
         return
     is_admin = user_id in ADMIN_IDS
     (text, welcome_photo) = get_welcome_text(is_admin)
@@ -88,17 +87,17 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
             if success and order:
                 await finalize_payment_ui(message, state, text, order, user_id=message.from_user.id)
             else:
-                await message.answer(text, parse_mode='Markdown')
+                await safe_edit_or_send(message, text, force_new=True)
         except Exception as e:
             from bot.errors import TariffNotFoundError
             if isinstance(e, TariffNotFoundError):
                 from bot.database.requests import get_setting
                 from bot.keyboards.user import support_kb
                 support_link = get_setting('support_channel_link', 'https://t.me/YadrenoChat')
-                await message.answer(str(e), reply_markup=support_kb(support_link), parse_mode='Markdown')
+                await safe_edit_or_send(message, str(e), reply_markup=support_kb(support_link), force_new=True)
             else:
                 logger.exception(f'Ошибка обработки платежа: {e}')
-                await message.answer('❌ Произошла ошибка при обработке платежа.', parse_mode='Markdown')
+                await safe_edit_or_send(message, '❌ Произошла ошибка при обработке платежа.', force_new=True)
         return
     if is_new and args and args.startswith('ref_'):
         ref_code = args[4:]
@@ -111,10 +110,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     show_referral = is_referral_enabled()
     kb = main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral)
     try:
-        if welcome_photo:
-            await message.answer_photo(photo=welcome_photo, caption=text, reply_markup=kb, parse_mode='MarkdownV2')
-        else:
-            await message.answer(text, reply_markup=kb, parse_mode='MarkdownV2')
+        await safe_edit_or_send(message, text, reply_markup=kb, photo=welcome_photo, force_new=True)
     except TelegramForbiddenError:
         logger.warning(f'User {user_id} blocked the bot during /start')
     except Exception as e:
@@ -134,14 +130,14 @@ async def callback_start(callback: CallbackQuery, state: FSMContext):
     show_trial = is_trial_enabled() and get_trial_tariff_id() is not None and (not has_used_trial(user_id))
     show_referral = is_referral_enabled()
     kb = main_menu_kb(is_admin=is_admin, show_trial=show_trial, show_referral=show_referral)
-    await safe_edit_or_send(callback.message, text, reply_markup=kb, parse_mode='MarkdownV2', photo=welcome_photo)
+    await safe_edit_or_send(callback.message, text, reply_markup=kb, photo=welcome_photo)
     await callback.answer()
 
 @router.message(Command('help'))
 async def cmd_help(message: Message, state: FSMContext):
     """Обработчик команды /help - вызывает логику кнопки 'Справка'."""
     if is_user_banned(message.from_user.id):
-        await message.answer('⛔ *Доступ заблокирован*\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', parse_mode='Markdown')
+        await safe_edit_or_send(message, '⛔ <b>Доступ заблокирован</b>\n\nВаш аккаунт заблокирован. Обратитесь в поддержку.', force_new=True)
         return
     await state.clear()
     await show_help(message, is_callback=False)
@@ -149,7 +145,7 @@ async def cmd_help(message: Message, state: FSMContext):
 async def show_help(message: 'Message', is_callback: bool = False):
     """Общая логика для показа справки.
     
-    Использует send_editor_message() для единого MarkdownV2-контракта.
+    Использует send_editor_message() для единого HTML-контракта.
     
     Args:
         message: Сообщение (Message) для отправки/редактирования
@@ -159,7 +155,7 @@ async def show_help(message: 'Message', is_callback: bool = False):
     from bot.keyboards.user import help_kb
     from database.requests import get_setting
     from bot.utils.message_editor import get_message_data, send_editor_message
-    help_data = get_message_data('help_page_text', '❓ *Справка*')
+    help_data = get_message_data('help_page_text', '❓ <b>Справка</b>')
     help_photo = help_data.get('photo_file_id')
     default_news = 'https://t.me/YadrenoRu'
     default_support = 'https://t.me/YadrenoChat'
@@ -175,11 +171,9 @@ async def show_help(message: 'Message', is_callback: bool = False):
     support_name = get_setting('support_button_name', 'Поддержка')
     kb = help_kb(news_link, support_link, news_hidden=news_hidden, support_hidden=support_hidden, news_name=news_name, support_name=support_name)
     if is_callback:
-        # Callback: редактируем через единый helper
-        await send_editor_message(message, data=help_data, default_text='❓ *Справка*', reply_markup=kb)
+        await send_editor_message(message, data=help_data, default_text='❓ <b>Справка</b>', reply_markup=kb)
     else:
-        # Команда /help: новое сообщение — тоже через helper (safe_edit_or_send обработает)
-        await send_editor_message(message, data=help_data, default_text='❓ *Справка*', reply_markup=kb)
+        await send_editor_message(message, data=help_data, default_text='❓ <b>Справка</b>', reply_markup=kb)
 
 @router.callback_query(F.data == 'help')
 async def help_handler(callback: CallbackQuery):

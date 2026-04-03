@@ -95,7 +95,7 @@ async def show_broadcast_menu(callback: CallbackQuery, state: FSMContext):
     user_count = count_users_for_broadcast(current_filter)
     
     text = (
-        "📢 *Рассылка*\n\n"
+        "📢 <b>Рассылка</b>\n\n"
         "Отправьте сообщение всем пользователям бота.\n\n"
         "1️⃣ Отредактируйте сообщение\n"
         "2️⃣ Выберите фильтр получателей\n"
@@ -104,8 +104,7 @@ async def show_broadcast_menu(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_main_kb(has_message, current_filter, in_progress, user_count),
-        parse_mode="Markdown"
+        reply_markup=broadcast_main_kb(has_message, current_filter, in_progress, user_count)
     )
     await callback.answer()
 
@@ -133,7 +132,7 @@ async def broadcast_edit_message(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.broadcast_waiting_message)
     
     text = (
-        "✉️ *Редактирование сообщения*\n\n"
+        "✉️ <b>Редактирование сообщения</b>\n\n"
         "Отправьте мне сообщение, которое хотите разослать.\n\n"
         "Можно отправить:\n"
         "• Текст (с форматированием)\n"
@@ -143,8 +142,7 @@ async def broadcast_edit_message(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_back_kb(),
-        parse_mode="Markdown"
+        reply_markup=broadcast_back_kb()
     )
     await callback.answer()
 
@@ -166,7 +164,7 @@ async def broadcast_save_message(message: Message, state: FSMContext):
     elif message.text:
         text = get_message_text_for_storage(message, 'markdown')
     else:
-        await message.answer(
+        await safe_edit_or_send(message,
             "❌ Поддерживаются только текст или фото с подписью.",
             reply_markup=broadcast_back_kb()
         )
@@ -174,10 +172,9 @@ async def broadcast_save_message(message: Message, state: FSMContext):
     
     save_broadcast_message(text, photo_file_id)
     
-    await message.answer(
-        "✅ *Сообщение сохранено!*\n\n"
-        "Теперь можете посмотреть превью или начать рассылку.",
-        parse_mode="Markdown"
+    await safe_edit_or_send(message,
+        "✅ <b>Сообщение сохранено!</b>\n\n"
+        "Теперь можете посмотреть превью или начать рассылку."
     )
     
     # Возвращаемся в меню рассылки
@@ -190,17 +187,17 @@ async def broadcast_save_message(message: Message, state: FSMContext):
     user_count = count_users_for_broadcast(current_filter)
     
     text = (
-        "📢 *Рассылка*\n\n"
+        "📢 <b>Рассылка</b>\n\n"
         "Отправьте сообщение всем пользователям бота.\n\n"
         "1️⃣ Отредактируйте сообщение\n"
         "2️⃣ Выберите фильтр получателей\n"
         "3️⃣ Нажмите «Начать рассылку»"
     )
     
-    await message.answer(
+    await safe_edit_or_send(message,
         text,
         reply_markup=broadcast_main_kb(has_message, current_filter, in_progress, user_count),
-        parse_mode="Markdown"
+        force_new=True
     )
 
 
@@ -225,15 +222,15 @@ async def broadcast_preview(callback: CallbackQuery):
     
     # Отправляем превью как отдельное сообщение
     if msg_data.get('photo_file_id'):
-        await callback.message.answer_photo(
+        await safe_edit_or_send(callback.message,
             photo=msg_data['photo_file_id'],
-            caption=msg_data.get('text', ''),
-            parse_mode="MarkdownV2"
+            text=msg_data.get('text', ''),
+            force_new=True
         )
     else:
-        await callback.message.answer(
-            msg_data['text'],
-            parse_mode="MarkdownV2"
+        await safe_edit_or_send(callback.message,
+            text=msg_data['text'],
+            force_new=True
         )
 
 
@@ -263,7 +260,7 @@ async def broadcast_set_filter(callback: CallbackQuery):
     user_count = count_users_for_broadcast(filter_key)
     
     text = (
-        "📢 *Рассылка*\n\n"
+        "📢 <b>Рассылка</b>\n\n"
         "Отправьте сообщение всем пользователям бота.\n\n"
         "1️⃣ Отредактируйте сообщение\n"
         "2️⃣ Выберите фильтр получателей\n"
@@ -272,8 +269,7 @@ async def broadcast_set_filter(callback: CallbackQuery):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_main_kb(has_message, filter_key, in_progress, user_count),
-        parse_mode="Markdown"
+        reply_markup=broadcast_main_kb(has_message, filter_key, in_progress, user_count)
     )
     await callback.answer(f"Фильтр: {BROADCAST_FILTERS[filter_key]}")
 
@@ -310,16 +306,15 @@ async def broadcast_start(callback: CallbackQuery):
     filter_name = BROADCAST_FILTERS.get(current_filter, 'Все')
     
     text = (
-        "🚀 *Подтверждение рассылки*\n\n"
-        f"*Фильтр:* {filter_name}\n"
-        f"*Получателей:* {user_count} чел.\n\n"
+        "🚀 <b>Подтверждение рассылки</b>\n\n"
+        f"<b>Фильтр:</b> {filter_name}\n"
+        f"<b>Получателей:</b> {user_count} чел.\n\n"
         "Начать рассылку?"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_confirm_kb(user_count),
-        parse_mode="Markdown"
+        reply_markup=broadcast_confirm_kb(user_count)
     )
     await callback.answer()
 
@@ -366,10 +361,9 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
     
     # Начинаем рассылку
     await safe_edit_or_send(callback.message, 
-        f"📤 *Рассылка запущена*\n\n"
+        f"📤 <b>Рассылка запущена</b>\n\n"
         f"Отправлено: 0/{total}\n"
-        f"🚫 Заблокировали бота: 0",
-        parse_mode="Markdown"
+        f"🚫 Заблокировали бота: 0"
     )
     await callback.answer()
     
@@ -382,14 +376,12 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
                 await bot.send_photo(
                     chat_id=user_id,
                     photo=photo_file_id,
-                    caption=text,
-                    parse_mode="MarkdownV2"
+                    caption=text
                 )
             else:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=text,
-                    parse_mode="MarkdownV2"
+                    text=text
                 )
             sent += 1
         except TelegramForbiddenError:
@@ -406,10 +398,9 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
         if (i + 1) % 10 == 0 or (i + 1) == total:
             try:
                 await safe_edit_or_send(callback.message, 
-                    f"📤 *Рассылка в процессе...*\n\n"
+                    f"📤 <b>Рассылка в процессе...</b>\n\n"
                     f"Отправлено: {sent}/{total}\n"
-                    f"🚫 Заблокировали бота: {blocked}",
-                    parse_mode="Markdown"
+                    f"🚫 Заблокировали бота: {blocked}"
                 )
             except TelegramBadRequest:
                 pass  # Сообщение не изменилось
@@ -422,11 +413,10 @@ async def broadcast_confirm(callback: CallbackQuery, bot: Bot):
     
     # Итоговый отчёт
     await safe_edit_or_send(callback.message, 
-        f"✅ *Рассылка завершена!*\n\n"
+        f"✅ <b>Рассылка завершена!</b>\n\n"
         f"📤 Отправлено: {sent}\n"
         f"🚫 Заблокировали бота: {blocked}",
-        reply_markup=home_only_kb(),
-        parse_mode="Markdown"
+        reply_markup=home_only_kb()
     )
 
 
@@ -444,16 +434,15 @@ async def broadcast_notifications(callback: CallbackQuery, state: FSMContext):
     days = int(get_setting('notification_days', '3'))
     
     text = (
-        "⏰ *Автоуведомления*\n\n"
+        "⏰ <b>Автоуведомления</b>\n\n"
         "Бот автоматически напоминает пользователям об истечении VPN-ключей.\n\n"
-        f"📅 Уведомлять за *{days}* дней до истечения\n"
+        f"📅 Уведомлять за <b>{days}</b> дней до истечения\n"
         "📝 Текст уведомления настраивается отдельно"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_notifications_kb(days),
-        parse_mode="Markdown"
+        reply_markup=broadcast_notifications_kb(days)
     )
     await callback.answer()
 
@@ -470,15 +459,14 @@ async def broadcast_notify_days(callback: CallbackQuery, state: FSMContext):
     current_days = get_setting('notification_days', '3')
     
     text = (
-        "📅 *За сколько дней уведомлять?*\n\n"
-        f"Текущее значение: *{current_days}* дней\n\n"
+        "📅 <b>За сколько дней уведомлять?</b>\n\n"
+        f"Текущее значение: <b>{current_days}</b> дней\n\n"
         "Введите число от 1 до 30:"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=broadcast_notify_back_kb(),
-        parse_mode="Markdown"
+        reply_markup=broadcast_notify_back_kb()
     )
     await callback.answer()
 
@@ -490,7 +478,7 @@ async def broadcast_save_notify_days(message: Message, state: FSMContext):
         return
     
     if not message.text or not message.text.isdigit():
-        await message.answer(
+        await safe_edit_or_send(message,
             "❌ Введите число!",
             reply_markup=broadcast_notify_back_kb()
         )
@@ -498,7 +486,7 @@ async def broadcast_save_notify_days(message: Message, state: FSMContext):
     
     days = int(message.text)
     if not 1 <= days <= 30:
-        await message.answer(
+        await safe_edit_or_send(message,
             "❌ Число должно быть от 1 до 30!",
             reply_markup=broadcast_notify_back_kb()
         )
@@ -506,25 +494,24 @@ async def broadcast_save_notify_days(message: Message, state: FSMContext):
     
     set_setting('notification_days', str(days))
     
-    await message.answer(
-        f"✅ Теперь уведомления будут отправляться за *{days}* дней до истечения.",
-        parse_mode="Markdown"
+    await safe_edit_or_send(message,
+        f"✅ Теперь уведомления будут отправляться за <b>{days}</b> дней до истечения."
     )
     
     # Возвращаемся в настройки уведомлений
     await state.set_state(AdminStates.broadcast_menu)
     
     text = (
-        "⏰ *Автоуведомления*\n\n"
+        "⏰ <b>Автоуведомления</b>\n\n"
         "Бот автоматически напоминает пользователям об истечении VPN-ключей.\n\n"
-        f"📅 Уведомлять за *{days}* дней до истечения\n"
+        f"📅 Уведомлять за <b>{days}</b> дней до истечения\n"
         "📝 Текст уведомления настраивается отдельно"
     )
     
-    await message.answer(
+    await safe_edit_or_send(message,
         text,
         reply_markup=broadcast_notifications_kb(days),
-        parse_mode="Markdown"
+        force_new=True
     )
 
 
@@ -542,10 +529,10 @@ async def broadcast_notify_text(callback: CallbackQuery, state: FSMContext):
         key='notification_text',
         back_callback='broadcast_notifications',
         help_text=(
-            "📝 *Справка: Текст уведомления об истечении*\n\n"
+            "📝 <b>Справка: Текст уведомления об истечении</b>\n\n"
             "Переменные:\n"
-            "• `%дней%` — количество дней до истечения\n"
-            "• `%имяключа%` — имя ключа"
+            "• <code>%дней%</code> — количество дней до истечения\n"
+            "• <code>%имяключа%</code> — имя ключа"
         ),
         allowed_types=['text', 'photo'],
     )

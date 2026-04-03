@@ -19,7 +19,7 @@ from database.requests import (
     get_active_referral_levels,
 )
 from bot.keyboards.user import referral_menu_kb
-from bot.utils.text import safe_edit_or_send, escape_md2
+from bot.utils.text import safe_edit_or_send, escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +34,17 @@ def format_price_compact(cents: int) -> str:
         return f"{cents / 100:.2f} ₽".replace(".", ",")
 
 
-# Дефолтные условия в MarkdownV2
+# Дефолтные условия в HTML
 DEFAULT_CONDITIONS_DAYS = (
-    "Приглашённые пользователи регистрируются по вашей ссылке\\. "
-    "Когда они оплачивают подписку, вы получаете процент от купленных дней\\. "
-    "Дни автоматически добавляются к вашему первому активному ключу\\."
+    "Приглашённые пользователи регистрируются по вашей ссылке. "
+    "Когда они оплачивают подписку, вы получаете процент от купленных дней. "
+    "Дни автоматически добавляются к вашему первому активному ключу."
 )
 
 DEFAULT_CONDITIONS_BALANCE = (
-    "Приглашённые пользователи регистрируются по вашей ссылке\\. "
-    "Когда они оплачивают подписку, вы получаете процент от суммы оплаты на свой баланс\\. "
-    "Накопленными средствами можно оплачивать новые ключи или продлевать существующие\\."
+    "Приглашённые пользователи регистрируются по вашей ссылке. "
+    "Когда они оплачивают подписку, вы получаете процент от суммы оплаты на свой баланс. "
+    "Накопленными средствами можно оплачивать новые ключи или продлевать существующие."
 )
 
 
@@ -76,19 +76,19 @@ async def show_referral_system(callback: CallbackQuery):
     stats = get_referral_stats(user_internal_id)
     balance = get_user_balance(user_internal_id)
     
-    # Весь текст в MarkdownV2
+    # Весь текст в HTML
     text_lines = [
-        "👥 *Реферальная система*",
+        "👥 <b>Реферальная система</b>",
         "",
         "📎 Ваша реферальная ссылка:",
-        f"`{referral_link}`",
+        f"<code>{escape_html(referral_link)}</code>",
         "",
     ]
     
     text_lines.append("━━━━━━━━━━━━━━━")
-    text_lines.append("📝 *Условия:*")
+    text_lines.append("📝 <b>Условия:</b>")
     if conditions_text:
-        # Текст из редактора уже в MarkdownV2
+        # Текст из редактора уже в HTML
         text_lines.append(conditions_text)
     elif reward_type == 'days':
         text_lines.append(DEFAULT_CONDITIONS_DAYS)
@@ -99,7 +99,7 @@ async def show_referral_system(callback: CallbackQuery):
     stats_by_level = {s['level']: s for s in stats} if stats else {}
     
     text_lines.append("━━━━━━━━━━━━━━━")
-    text_lines.append("📊 *Ваша статистика:*")
+    text_lines.append("📊 <b>Ваша статистика:</b>")
     text_lines.append("")
     
     for level_num, percent in active_levels:
@@ -108,22 +108,22 @@ async def show_referral_system(callback: CallbackQuery):
         
         if reward_type == 'days':
             total_reward = level_stat['total_reward_days'] if level_stat else 0
-            reward_display = escape_md2(f"{total_reward} дн.")
+            reward_display = escape_html(f"{total_reward} дн.")
         else:
             total_reward = level_stat['total_reward_cents'] if level_stat else 0
-            reward_display = escape_md2(format_price_compact(total_reward))
+            reward_display = escape_html(format_price_compact(total_reward))
         
-        # Динамические значения экранируются через escape_md2
+        # Динамические значения экранируются через escape_html
         text_lines.append(
-            f"Уровень {escape_md2(str(level_num))} "
-            f"\\({escape_md2(str(percent))}%\\): "
-            f"{escape_md2(str(count))} чел\\. — {reward_display}"
+            f"Уровень {escape_html(str(level_num))} "
+            f"({escape_html(str(percent))}%): "
+            f"{escape_html(str(count))} чел. — {reward_display}"
         )
     text_lines.append("")
     
     if reward_type == 'balance':
         text_lines.append("━━━━━━━━━━━━━━━")
-        text_lines.append(f"💰 *Ваш баланс:* {escape_md2(format_price_compact(balance))}")
+        text_lines.append(f"💰 <b>Ваш баланс:</b> {escape_html(format_price_compact(balance))}")
         text_lines.append("")
     
     text = "\n".join(text_lines)
@@ -131,7 +131,6 @@ async def show_referral_system(callback: CallbackQuery):
     await safe_edit_or_send(callback.message, 
         text,
         reply_markup=referral_menu_kb(),
-        parse_mode="MarkdownV2",
         photo=conditions_photo,
     )
     await callback.answer()

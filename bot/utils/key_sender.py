@@ -11,15 +11,15 @@ from bot.utils.key_generator import generate_link, generate_json, generate_qr_co
 logger = logging.getLogger(__name__)
 
 
-# Дефолтный текст выдачи ключа в формате MarkdownV2
+# Дефолтный текст выдачи ключа в формате HTML
 DEFAULT_KEY_DELIVERY_TEXT = (
-    "✅ *Ваш VPN\\-ключ\\!*\n\n"
+    "✅ <b>Ваш VPN-ключ!</b>\n\n"
     "%ключ%\n"
-    "☝️ Нажмите, чтобы скопировать\\.\n\n"
-    "📱 *Инструкция:*\n"
-    "1\\. Скопируйте ссылку или отсканируйте QR\\-код\\.\n"
-    "2\\. Импортируйте в свой клиент\\. Какие именно клиент подходит смотри в инструкции по кнопке ниже\\.\n"
-    "3\\. Нажмите подключиться\\!"
+    "☝️ Нажмите, чтобы скопировать.\n\n"
+    "📱 <b>Инструкция:</b>\n"
+    "1. Скопируйте ссылку или отсканируйте QR-код.\n"
+    "2. Импортируйте в свой клиент. Какой именно клиент подходит, смотри в инструкции по кнопке ниже.\n"
+    "3. Нажмите подключиться!"
 )
 
 
@@ -32,7 +32,7 @@ async def send_key_with_qr(
     """
     Отправляет пользователю ключ с QR-кодом и файлом конфигурации.
     
-    Использует единый MarkdownV2-контракт для текстов из редактора.
+    Использует единый HTML-контракт для текстов из редактора.
     
     Args:
         messageable: Объект Message или CallbackQuery, куда отвечать
@@ -40,7 +40,7 @@ async def send_key_with_qr(
         key_manage_markup: Клавиатура управления ключом
         is_new: Является ли ключ только что созданным
     """
-    from bot.utils.text import escape_md2
+    from bot.utils.text import escape_html
     
     try:
         # Проверяем наличие необходимых данных
@@ -61,11 +61,11 @@ async def send_key_with_qr(
             # отправляем просто UUID (как раньше)
             uuid = key_data.get('client_uuid', 'Unknown')
             text = (
-                f"📋 *Ваш VPN\\-ключ*\n\n"
-                f"```\n{uuid}\n```\n\n"
-                "☝️ Нажмите на ключ, чтобы скопировать\\.\n"
-                "⚠️ Не удалось получить полную конфигурацию \\(сервер недоступен\\)\\.\n"
-                "Попробуйте позже\\."
+                f"📋 <b>Ваш VPN-ключ</b>\n\n"
+                f"<pre>{escape_html(uuid)}</pre>\n\n"
+                "☝️ Нажмите на ключ, чтобы скопировать.\n"
+                "⚠️ Не удалось получить полную конфигурацию (сервер недоступен).\n"
+                "Попробуйте позже."
             )
             await _send_text(messageable, text, key_manage_markup)
             return
@@ -83,20 +83,18 @@ async def send_key_with_qr(
         delivery_data = get_message_data('key_delivery_text', DEFAULT_KEY_DELIVERY_TEXT)
         base_caption = delivery_data.get('text', DEFAULT_KEY_DELIVERY_TEXT)
         
-        # Подстановка %ключ% — внутри ``` экранирование не нужно
-        key_snippet = f"```\n{link}\n```"
+        # Подстановка %ключ% — внутри <pre> экранирование не нужно
+        key_snippet = f"<pre>{link}</pre>"
         caption = base_caption.replace('%ключ%', key_snippet)
-        # Также проверяем экранированный вариант плейсхолдера (если текст из md_text)
-        caption = caption.replace('%ключ%', key_snippet)
         
         # Если caption слишком длинный (Telegram limit 1024), сокращаем
         if len(caption) > 1024:
-             title = "✅ *Ваш новый VPN\\-ключ\\!*" if is_new else "📋 *Ваш VPN\\-ключ*"
+             title = "✅ <b>Ваш новый VPN-ключ!</b>" if is_new else "📋 <b>Ваш VPN-ключ</b>"
              caption = (
                 f"{title}\n\n"
-                "👇 *Ваша ссылка доступа \\(нажмите для копирования\\):*\n"
-                f"`{link}`\n\n"
-                "📸 Отсканируйте QR\\-код для быстрого подключения\\."
+                "👇 <b>Ваша ссылка доступа (нажмите для копирования):</b>\n"
+                f"<code>{escape_html(link)}</code>\n\n"
+                "📸 Отсканируйте QR-код для быстрого подключения."
              )
 
         # 4. Отправляем фото с QR и ссылкой
@@ -111,7 +109,7 @@ async def send_key_with_qr(
         await send_func(
             photo=photo,
             caption=caption,
-            parse_mode="MarkdownV2"
+            parse_mode="HTML"
         )
         
         # Отправляем файл и клавиатуру отдельным сообщением
@@ -126,9 +124,9 @@ async def send_key_with_qr(
 
         await answer_func(
             document=config_file,
-            caption="📂 *Файл конфигурации* \\(для ручного импорта\\)",
+            caption="📂 <b>Файл конфигурации</b> (для ручного импорта)",
             reply_markup=key_manage_markup,
-            parse_mode="MarkdownV2"
+            parse_mode="HTML"
         )
 
     except Exception as e:
@@ -153,12 +151,12 @@ async def _send_error(messageable, text, markup):
 
 
 async def _send_text(messageable, text, markup):
-    """Отправляет текстовое сообщение (fallback при отсутствии фото). MarkdownV2."""
+    """Отправляет текстовое сообщение (fallback при отсутствии фото). HTML."""
     from bot.utils.text import safe_edit_or_send
     if hasattr(messageable, 'text') or hasattr(messageable, 'photo'):
-        await safe_edit_or_send(messageable, text, reply_markup=markup, parse_mode="MarkdownV2")
+        await safe_edit_or_send(messageable, text, reply_markup=markup)
     elif hasattr(messageable, 'message'):
-        await safe_edit_or_send(messageable.message, text, reply_markup=markup, parse_mode="MarkdownV2")
+        await safe_edit_or_send(messageable.message, text, reply_markup=markup)
     else:
         func = messageable.answer if hasattr(messageable, 'answer') else messageable.message.answer
-        await func(text, reply_markup=markup, parse_mode="MarkdownV2")
+        await func(text, reply_markup=markup, parse_mode="HTML")

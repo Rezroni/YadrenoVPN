@@ -4,11 +4,10 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -30,7 +29,7 @@ async def renew_stars_select_tariff(callback: CallbackQuery):
     if not tariffs:
         await callback.answer('Нет доступных тарифов', show_alert=True)
         return
-    await safe_edit_or_send(callback.message, f"⭐ *Оплата звёздами*\n\n🔑 Ключ: *{escape_md(key['display_name'])}*\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, f"⭐ <b>Оплата звёздами</b>\n\n🔑 Ключ: <b>{escape_html(key['display_name'])}</b>\n\nВыберите тариф для продления:", reply_markup=renew_tariff_select_kb(tariffs, key_id, order_id=order_id))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('renew_pay_stars:'))
@@ -72,10 +71,10 @@ async def pay_stars_select_tariff(callback: CallbackQuery):
         order_id = callback.data.split(':')[1]
     tariffs = get_all_tariffs(include_hidden=False)
     if not tariffs:
-        await safe_edit_or_send(callback.message, '⭐ *Оплата звёздами*\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, '⭐ <b>Оплата звёздами</b>\n\n😔 Нет доступных тарифов.\n\nПопробуйте позже или обратитесь в поддержку.', reply_markup=home_only_kb())
         await callback.answer()
         return
-    await safe_edit_or_send(callback.message, '⭐ *Оплата звёздами*\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '⭐ <b>Оплата звёздами</b>\n\nВыберите тариф:', reply_markup=tariff_select_kb(tariffs, order_id=order_id))
     await callback.answer()
 
 @router.callback_query(F.data.startswith('stars_pay:'))
@@ -101,8 +100,6 @@ async def pay_stars_invoice(callback: CallbackQuery):
             return
         (_, order_id) = create_pending_order(user_id=user_id, tariff_id=tariff_id, payment_type='stars', vpn_key_id=None)
     try:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
         bot_info = await callback.bot.get_me()
         bot_name = bot_info.first_name
         price_stars = tariff['price_stars']

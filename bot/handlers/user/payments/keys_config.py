@@ -4,11 +4,10 @@ from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from bot.utils.text import escape_md, safe_edit_or_send
+from bot.utils.text import escape_html, safe_edit_or_send
 from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
-from bot.utils.text import safe_edit_or_send
 
 router = Router()
 
@@ -30,11 +29,11 @@ async def start_new_key_config(message: Message, state: FSMContext, order_id: st
         servers = get_active_servers()
     if not servers:
         logger.error(f'Нет активных серверов для создания ключа (Order: {order_id})')
-        await message.answer('🎉 *Оплата прошла успешно!*\n\n⚠️ К сожалению, сейчас нет доступных серверов.\nПожалуйста, свяжитесь с поддержкой.', reply_markup=home_only_kb(), parse_mode='Markdown')
+        await safe_edit_or_send(message, '🎉 <b>Оплата прошла успешно!</b>\n\n⚠️ К сожалению, сейчас нет доступных серверов.\nПожалуйста, свяжитесь с поддержкой.', reply_markup=home_only_kb(), force_new=True)
         return
     await state.set_state(NewKeyConfig.waiting_for_server)
     await state.update_data(new_key_order_id=order_id, new_key_id=key_id)
-    await message.answer('🎉 *Оплата прошла успешно!*\n\n🔑 Теперь выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers), parse_mode='Markdown')
+    await safe_edit_or_send(message, '🎉 <b>Оплата прошла успешно!</b>\n\n🔑 Теперь выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers), force_new=True)
 
 @router.callback_query(F.data.startswith('new_key_server:'))
 async def process_new_key_server_selection(callback: CallbackQuery, state: FSMContext):
@@ -59,7 +58,7 @@ async def process_new_key_server_selection(callback: CallbackQuery, state: FSMCo
             await process_new_key_final(callback, state, server_id, inbounds[0]['id'])
             return
         await state.set_state(NewKeyConfig.waiting_for_inbound)
-        await safe_edit_or_send(callback.message, f"🖥️ *Сервер:* {server['name']}\n\nВыберите протокол:", reply_markup=new_key_inbound_list_kb(inbounds), parse_mode='Markdown')
+        await safe_edit_or_send(callback.message, f"🖥️ <b>Сервер:</b> {escape_html(server['name'])}\n\nВыберите протокол:", reply_markup=new_key_inbound_list_kb(inbounds))
     except VPNAPIError as e:
         await callback.answer(f'❌ Ошибка подключения: {e}', show_alert=True)
     await callback.answer()
@@ -124,7 +123,7 @@ async def process_new_key_final(callback: CallbackQuery, state: FSMContext, serv
         await send_key_with_qr(callback, new_key, key_issued_kb(), is_new=True)
     except Exception as e:
         logger.error(f'Ошибка настройки ключа (id={key_id}): {e}')
-        await safe_edit_or_send(callback.message, f'❌ Ошибка настройки ключа: {e}\nОбратитесь в поддержку, указав Order ID: ' + str(order_id))
+        await safe_edit_or_send(callback.message, f'❌ Ошибка настройки ключа: {escape_html(str(e))}\nОбратитесь в поддержку, указав Order ID: ' + str(order_id))
 
 @router.callback_query(F.data == 'back_to_server_select')
 async def back_to_server_select(callback: CallbackQuery, state: FSMContext):
@@ -141,4 +140,4 @@ async def back_to_server_select(callback: CallbackQuery, state: FSMContext):
         tariff_id = order.get('tariff_id') if order else None
     servers = get_servers_for_key(tariff_id) if tariff_id else get_active_servers()
     await state.set_state(NewKeyConfig.waiting_for_server)
-    await safe_edit_or_send(callback.message, '🔑 Выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers), parse_mode='Markdown')
+    await safe_edit_or_send(callback.message, '🔑 Выберите сервер для вашего нового ключа.', reply_markup=new_key_server_list_kb(servers))

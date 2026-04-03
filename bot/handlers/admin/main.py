@@ -44,16 +44,16 @@ async def get_admin_stats_text() -> str:
     
     if not servers:
         return (
-            "⚙️ *Админ-панель*\n\n"
+            "⚙️ <b>Админ-панель</b>\n\n"
             "🖥️ Серверов пока нет.\n"
             "Добавьте первый сервер в разделе «Сервера»."
         )
     
-    lines = ["⚙️ *Админ-панель*\n"]
+    lines = ["⚙️ <b>Админ-панель</b>\n"]
     
     for server in servers:
         status_emoji = "🟢" if server['is_active'] else "🔴"
-        lines.append(f"{status_emoji} *{server['name']}* (`{server['host']}:{server['port']}`)")
+        lines.append(f"{status_emoji} <b>{server['name']}</b> (<code>{server['host']}:{server['port']}</code>)")
         
         if server['is_active']:
             # Пробуем получить статистику
@@ -102,8 +102,7 @@ async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
     try:
         await safe_edit_or_send(callback.message, 
             text,
-            reply_markup=admin_main_menu_kb(),
-            parse_mode="Markdown"
+            reply_markup=admin_main_menu_kb()
         )
     except TelegramBadRequest as e:
         if "is not modified" not in str(e):
@@ -124,23 +123,21 @@ async def show_author_support(callback: CallbackQuery):
     await callback.answer()
     
     text = (
-        "👤 *Автор и поддержка*\n\n"
-        "*Разработчик*: [Plushkin Blog](https://t.me/plushkin_blog)\n\n"
+        "👤 <b>Автор и поддержка</b>\n\n"
+        "<b>Разработчик</b>: <a href=\"https://t.me/plushkin_blog\">Plushkin Blog</a>\n\n"
         "Я собираю деньги на разработку игры в жанре MMORTS с честной экономикой и никакого pay2win. Т.е. нельзя будет ничего купить у автора игры, никаких эксклюзивных вещей или бесконечных ресурсов для богатых.\n\n"
         "Очень нужна ваша поддержка, даже 100р уже вперед. как говорится с мира по нитке ;)\n"
-        "💳 *Карты РФ*: https://yoomoney.ru/fundraise/1GJ73GGRJBC.260318\n"
-        "💰 *USDT (TON/BSC/ARBITRUM)*: https://t.me/Ya_SellerBot?start=item-40\n\n"
+        "💳 <b>Карты РФ</b>: https://yoomoney.ru/fundraise/1GJ73GGRJBC.260318\n"
+        "💰 <b>USDT (TON/BSC/ARBITRUM)</b>: https://t.me/Ya_SellerBot?start=item-40\n\n"
         "‼️Другие полезные для тебя боты\n\n"
-        "@Ya_FooterBot - _сделай автоматическую подпись ко всем постам в своем канале, добавь туда ссылку на свой VPN_"
+        "@Ya_FooterBot - <i>сделай автоматическую подпись ко всем постам в своем канале, добавь туда ссылку на свой VPN</i>"
     )
     
     try:
         await safe_edit_or_send(
             callback.message, 
             text,
-            reply_markup=author_support_kb(),
-            parse_mode="Markdown",
-            disable_web_page_preview=True
+            reply_markup=author_support_kb()
         )
     except TelegramBadRequest as e:
         if "is not modified" not in str(e):

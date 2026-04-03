@@ -57,10 +57,10 @@ async def show_referral_menu(callback: CallbackQuery, state: FSMContext):
         type_text = "💰 На баланс"
     
     text = (
-        f"🔗 *Реферальная система*\n\n"
-        f"{status_emoji} Статус: *{status_text}*\n"
-        f"📊 Режим начисления: *{type_text}*\n\n"
-        f"*Уровни:*\n"
+        f"🔗 <b>Реферальная система</b>\n\n"
+        f"{status_emoji} Статус: <b>{status_text}</b>\n"
+        f"📊 Режим начисления: <b>{type_text}</b>\n\n"
+        f"<b>Уровни:</b>\n"
     )
     
     for level in levels:
@@ -77,8 +77,7 @@ async def show_referral_menu(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=referral_main_kb(enabled, reward_type, levels),
-        parse_mode="Markdown"
+        reply_markup=referral_main_kb(enabled, reward_type, levels)
     )
     await callback.answer()
 
@@ -155,16 +154,15 @@ async def referral_level_view(callback: CallbackQuery, state: FSMContext):
     status = "включён" if level['enabled'] else "выключен"
     
     text = (
-        f"📊 *Уровень {level_num}*\n\n"
-        f"Процент: *{level['percent']}%*\n"
-        f"Статус: *{status}*\n\n"
+        f"📊 <b>Уровень {level_num}</b>\n\n"
+        f"Процент: <b>{level['percent']}%</b>\n"
+        f"Статус: <b>{status}</b>\n\n"
         "Выберите действие:"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=referral_level_kb(level_num, level['percent'], level['enabled']),
-        parse_mode="Markdown"
+        reply_markup=referral_level_kb(level_num, level['percent'], level['enabled'])
     )
     await callback.answer()
 
@@ -225,15 +223,14 @@ async def referral_level_percent_start(callback: CallbackQuery, state: FSMContex
     )
     
     text = (
-        f"📊 *Уровень {level_num}*\n\n"
-        f"Текущий процент: *{level['percent']}%*\n\n"
+        f"📊 <b>Уровень {level_num}</b>\n\n"
+        f"Текущий процент: <b>{level['percent']}%</b>\n\n"
         "Введите новый процент (1-100):"
     )
     
     await safe_edit_or_send(callback.message, 
         text,
-        reply_markup=referral_back_kb(),
-        parse_mode="Markdown"
+        reply_markup=referral_back_kb()
     )
     await callback.answer()
 
@@ -256,7 +253,7 @@ async def referral_level_percent_input(message: Message, state: FSMContext):
     text = get_message_text_for_storage(message, 'plain')
     
     if not text.isdigit() or not (1 <= int(text) <= 100):
-        await message.answer("❌ Введите число от 1 до 100:")
+        await safe_edit_or_send(message, "❌ Введите число от 1 до 100:")
         return
     
     new_percent = int(text)

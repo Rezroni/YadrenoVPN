@@ -776,15 +776,15 @@ async def complete_payment_flow(
             # Финализация UI
             await finalize_payment_ui(message, state, text, order, user_id=telegram_id)
         else:
-            await message.answer(text, reply_markup=home_only_kb(), parse_mode='Markdown')
+            await message.answer(text, reply_markup=home_only_kb(), parse_mode='HTML')
     
     except Exception as e:
         from bot.errors import TariffNotFoundError
         if isinstance(e, TariffNotFoundError):
             from bot.keyboards.user import support_kb
             support_link = get_setting('support_channel_link', 'https://t.me/YadrenoChat')
-            await message.answer(str(e), reply_markup=support_kb(support_link), parse_mode='Markdown')
+            await message.answer(str(e), reply_markup=support_kb(support_link), parse_mode='HTML')
         else:
             logger.exception(f'Ошибка обработки {payment_type} платежа: {e}')
-            await message.answer('❌ Произошла ошибка при обработке платежа.', parse_mode='Markdown')
+            await message.answer('❌ Произошла ошибка при обработке платежа.', parse_mode='HTML')
 
