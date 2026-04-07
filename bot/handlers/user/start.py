@@ -23,7 +23,7 @@ def get_welcome_text(is_admin: bool=False) -> tuple:
     Returns:
         Кортеж (text, photo_file_id) — текст и опциональное фото
     """
-    from database.requests import get_all_tariffs, get_setting, is_crypto_configured, is_stars_enabled, is_cards_enabled, is_yookassa_qr_configured
+    from database.requests import get_all_tariffs, get_setting, is_crypto_configured, is_stars_enabled, is_cards_enabled, is_yookassa_qr_configured, is_demo_payment_enabled
     from bot.utils.text import escape_html
     from bot.utils.message_editor import get_message_data
     welcome_data = get_message_data('main_page_text', '🔐 <b>Добро пожаловать в VPN-бот!</b>')
@@ -33,6 +33,7 @@ def get_welcome_text(is_admin: bool=False) -> tuple:
     stars_enabled = is_stars_enabled()
     cards_enabled = is_cards_enabled()
     yookassa_qr_enabled = is_yookassa_qr_configured()
+    demo_enabled = is_demo_payment_enabled()
     tariffs = get_all_tariffs()
     tariff_lines = []
     if tariffs:
@@ -45,7 +46,7 @@ def get_welcome_text(is_admin: bool=False) -> tuple:
                 prices.append(f'${escape_html(price_str)}')
             if stars_enabled:
                 prices.append(f"{tariff['price_stars']} ⭐")
-            if (cards_enabled or yookassa_qr_enabled) and tariff.get('price_rub', 0) > 0:
+            if (cards_enabled or yookassa_qr_enabled or demo_enabled) and tariff.get('price_rub', 0) > 0:
                 prices.append(f"{int(tariff['price_rub'])} ₽")
             price_display = ' / '.join(prices) if prices else 'Цена не установлена'
             tariff_lines.append(f"• {escape_html(tariff['name'])} — {price_display}")
@@ -91,7 +92,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         except Exception as e:
             from bot.errors import TariffNotFoundError
             if isinstance(e, TariffNotFoundError):
-                from bot.database.requests import get_setting
+                from database.requests import get_setting
                 from bot.keyboards.user import support_kb
                 support_link = get_setting('support_channel_link', 'https://t.me/YadrenoChat')
                 await safe_edit_or_send(message, str(e), reply_markup=support_kb(support_link), force_new=True)
