@@ -255,11 +255,34 @@ async def pay_card_balance_handler(callback: CallbackQuery, state: FSMContext):
     (_, order_id) = create_pending_order(user_id=user_id, tariff_id=tariff_id, payment_type='cards', vpn_key_id=key_id)
     price_rub = remaining_cents / 100
     price_kopecks = remaining_cents
+    
+    import json
+    provider_data = {
+        "receipt": {
+            "customer": {
+                "email": f"user_{order_id}@t.me"
+            },
+            "items": [
+                {
+                    "description": f"Доплата за «{tariff['name']}»",
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{price_rub:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1,
+                    "payment_mode": "full_prepayment",
+                    "payment_subject": "service"
+                }
+            ]
+        }
+    }
+
     try:
         bot_info = await callback.bot.get_me()
         bot_name = bot_info.first_name
         back_cb = f'key_renew:{key_id}' if key_id else 'buy_key'
-        await callback.message.answer_invoice(title=bot_name, description=f"Оплата тарифа «{tariff['name']}» ({tariff['duration_days']} дн.).", payload=f'vpn_key:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f'💳 Оплатить {price_rub:.2f} ₽', pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data=back_cb)).as_markup())
+        await callback.message.answer_invoice(title=bot_name, description=f"Оплата тарифа «{tariff['name']}» ({tariff['duration_days']} дн.).", payload=f'vpn_key:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], provider_data=json.dumps(provider_data), reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f'💳 Оплатить {price_rub:.2f} ₽', pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data=back_cb)).as_markup())
     except TelegramBadRequest as e:
         if 'CURRENCY_TOTAL_AMOUNT_INVALID' in str(e):
             logger.warning(f"Ошибка платежа (CARDS): Неправильная сумма. Тариф: ID {tariff['id']}")

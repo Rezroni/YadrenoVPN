@@ -59,11 +59,34 @@ async def pay_cards_invoice(callback: CallbackQuery):
     if price_kopecks <= 0:
         await callback.answer('❌ Ошибка: цена тарифа в рублях не задана.', show_alert=True)
         return
+    import json
     from aiogram.exceptions import TelegramBadRequest
+
+    provider_data = {
+        "receipt": {
+            "customer": {
+                "email": f"user_{order_id}@t.me"
+            },
+            "items": [
+                {
+                    "description": f"Тариф «{tariff['name']}»",
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{price_rub:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1,
+                    "payment_mode": "full_prepayment",
+                    "payment_subject": "service"
+                }
+            ]
+        }
+    }
+
     try:
         bot_info = await callback.bot.get_me()
         bot_name = bot_info.first_name
-        await callback.message.answer_invoice(title=bot_name, description=f"Оплата тарифа «{tariff['name']}» ({days} дн.).", payload=f'vpn_key:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f'💳 Оплатить {price_rub} ₽', pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data='buy_key')).as_markup())
+        await callback.message.answer_invoice(title=bot_name, description=f"Оплата тарифа «{tariff['name']}» ({days} дн.).", payload=f'vpn_key:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], provider_data=json.dumps(provider_data), reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f'💳 Оплатить {price_rub} ₽', pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data='buy_key')).as_markup())
     except TelegramBadRequest as e:
         if 'CURRENCY_TOTAL_AMOUNT_INVALID' in str(e):
             logger.warning(f"Ошибка платежа (CARDS): Неправильная сумма (меньше лимита ~$1). Тариф: ID {tariff['id']}, Цена {price_rub} руб. Подробности: {e}")
@@ -125,11 +148,34 @@ async def renew_cards_invoice(callback: CallbackQuery):
     if price_kopecks <= 0:
         await callback.answer('❌ Ошибка: цена тарифа в рублях не задана.', show_alert=True)
         return
+    import json
     from aiogram.exceptions import TelegramBadRequest
+    
+    provider_data = {
+        "receipt": {
+            "customer": {
+                "email": f"user_{order_id}@t.me"
+            },
+            "items": [
+                {
+                    "description": f"Продление «{tariff['name']}»",
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{price_rub:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1,
+                    "payment_mode": "full_prepayment",
+                    "payment_subject": "service"
+                }
+            ]
+        }
+    }
+
     try:
         bot_info = await callback.bot.get_me()
         bot_name = bot_info.first_name
-        await callback.message.answer_invoice(title=bot_name, description=f"Продление ключа «{key['display_name']}»: {tariff['name']}.", payload=f'renew:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f"💳 Оплатить {tariff.get('price_rub', 0)} ₽", pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data=f'renew_invoice_cancel:{key_id}:{tariff_id}')).as_markup())
+        await callback.message.answer_invoice(title=bot_name, description=f"Продление ключа «{key['display_name']}»: {tariff['name']}.", payload=f'renew:{order_id}', provider_token=provider_token, currency='RUB', prices=[LabeledPrice(label=f"Тариф {tariff['name']}", amount=price_kopecks)], provider_data=json.dumps(provider_data), reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text=f"💳 Оплатить {tariff.get('price_rub', 0)} ₽", pay=True)).row(InlineKeyboardButton(text='❌ Отмена', callback_data=f'renew_invoice_cancel:{key_id}:{tariff_id}')).as_markup())
     except TelegramBadRequest as e:
         if 'CURRENCY_TOTAL_AMOUNT_INVALID' in str(e):
             logger.warning(f"Ошибка платежа (CARDS_RENEW): Неправильная сумма (меньше лимита ~$1). Тариф: ID {tariff['id']}, Цена {price_rub} руб. Подробности: {e}")
