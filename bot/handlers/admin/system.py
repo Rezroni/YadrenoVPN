@@ -26,6 +26,7 @@ from bot.utils.git_utils import (
     force_pull_updates,
     get_last_commit_info,
     get_previous_commits_info,
+    install_requirements,
     restart_bot,
 )
 from bot.keyboards.admin import (
@@ -40,6 +41,7 @@ from bot.keyboards.admin import (
 logger = logging.getLogger(__name__)
 
 from bot.utils.text import safe_edit_or_send
+from bot.utils.update_block import is_update_blocked, get_blocked_message, try_unblock, set_update_blocked
 
 router = Router()
 
@@ -119,6 +121,18 @@ async def admin_update_cmd(message: Message, state: FSMContext):
     
     await state.clear()
     await asyncio.sleep(2)
+    
+    # Устанавливаем/обновляем зависимости
+    success, req_message = install_requirements()
+    if not success:
+        logger.error(f"Ошибка установки зависимостей: {req_message}")
+        await safe_edit_or_send(message,
+            f"⚠️ <b>Ошибка установки зависимостей</b>\n\n{req_message}\n\n"
+            "Бот не будет перезапущен. Проверьте requirements.txt и попробуйте снова.",
+            force_new=True
+        )
+        return
+    
     restart_bot()
 
 
@@ -148,6 +162,17 @@ async def show_update_confirm(callback: CallbackQuery, state: FSMContext):
     current_remote = get_remote_url()
     if current_remote != GITHUB_REPO_URL:
         set_remote_url(GITHUB_REPO_URL)
+
+    # Проверяем условия разблокировки
+    try_unblock()
+
+    if is_update_blocked():
+        await safe_edit_or_send(callback.message,
+            get_blocked_message(),
+            reply_markup=back_and_home_kb("admin_bot_settings")
+        )
+        await callback.answer()
+        return
     
     # Показываем сообщение о проверке
     await safe_edit_or_send(callback.message, 
@@ -284,6 +309,7 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
     logger.info(f"🔄 Бот обновлён администратором {callback.from_user.id}")
     
     if has_blocking:
+        set_update_blocked()
         await safe_edit_or_send(callback.message, 
             f"✅ <b>Блокирующее обновление завершено!</b>\n\n{message}\n\n"
             "⚠️ После перезапуска выполните требуемые действия перед следующим обновлением.\n\n"
@@ -302,6 +328,16 @@ async def update_bot_confirmed(callback: CallbackQuery, state: FSMContext):
     
     # Даём время на отправку сообщения
     await asyncio.sleep(2)
+    
+    # Устанавливаем/обновляем зависимости
+    success, req_message = install_requirements()
+    if not success:
+        logger.error(f"Ошибка установки зависимостей: {req_message}")
+        await safe_edit_or_send(callback.message,
+            f"⚠️ <b>Ошибка установки зависимостей</b>\n\n{req_message}\n\n"
+            "Бот не будет перезапущен. Проверьте requirements.txt и попробуйте снова."
+        )
+        return
     
     # Перезапускаем бота
     restart_bot()
@@ -375,6 +411,16 @@ async def force_overwrite_confirmed(callback: CallbackQuery, state: FSMContext):
     # Даём время на отправку сообщения
     await asyncio.sleep(2)
     
+    # Устанавливаем/обновляем зависимости
+    success, req_message = install_requirements()
+    if not success:
+        logger.error(f"Ошибка установки зависимостей: {req_message}")
+        await safe_edit_or_send(callback.message,
+            f"⚠️ <b>Ошибка установки зависимостей</b>\n\n{req_message}\n\n"
+            "Бот не будет перезапущен. Проверьте requirements.txt и попробуйте снова."
+        )
+        return
+    
     # Перезапускаем бота
     restart_bot()
 
@@ -401,10 +447,10 @@ async def edit_texts_menu(callback: CallbackQuery, state: FSMContext):
     
     builder = InlineKeyboardBuilder()
     
-    builder.row(InlineKeyboardButton(text="📝 Главная страница", callback_data="edit_text:main_page_text"))
-    builder.row(InlineKeyboardButton(text="📝 Справка (текст)", callback_data="edit_text:help_page_text"))
-    builder.row(InlineKeyboardButton(text="📝 Текст перед оплатой", callback_data="edit_text:prepayment_text"))
-    builder.row(InlineKeyboardButton(text="📝 Текст выдачи ключа", callback_data="edit_text:key_delivery_text"))
+    builder.row(InlineKeyboardButton(text="📝 Главная страница", callback_data="edit_text:main"))
+    builder.row(InlineKeyboardButton(text="📝 Справка (текст)", callback_data="edit_text:help"))
+    builder.row(InlineKeyboardButton(text="📝 Текст перед оплатой", callback_data="edit_text:prepayment"))
+    builder.row(InlineKeyboardButton(text="📝 Текст выдачи ключа", callback_data="edit_text:key_delivery"))
     builder.row(InlineKeyboardButton(text="📢 Ссылка: Новости", callback_data="edit_link:news"))
     builder.row(InlineKeyboardButton(text="💬 Ссылка: Поддержка", callback_data="edit_link:support"))
     
@@ -431,10 +477,10 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     
     # Белый список допустимых ключей — защита от инъекции произвольного ключа настроек
     ALLOWED_KEYS = {
-        'main_page_text',
-        'help_page_text',
-        'prepayment_text',
-        'key_delivery_text',
+        'main',
+        'help',
+        'prepayment',
+        'key_delivery',
     }
     
     if key not in ALLOWED_KEYS:
@@ -443,7 +489,7 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     
     # Тексты справки для каждого ключа
     help_texts = {
-        'main_page_text': (
+        'main': (
             "📝 <b>Справка: Текст главной страницы</b>\n\n"
             "Чтобы изменить текст, вернитесь и просто отправьте боту новое сообщение с нужным текстом.\n"
             "Вы можете прикрепить фото/видео.\n\n"
@@ -451,7 +497,7 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
             "• <code>%тарифы%</code> — список тарифов с ценами\n"
             "• <code>%без_тарифов%</code> — не добавлять тарифы"
         ),
-        'key_delivery_text': (
+        'key_delivery': (
             "📝 <b>Справка: Текст выдачи ключа</b>\n\n"
             "Формат: **Только текст** (без фото).\n\n"
             "Переменные:\n"
@@ -459,7 +505,7 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
         ),
     }
     
-    current_allowed_types = ['text'] if key == 'key_delivery_text' else ['text', 'photo']
+    current_allowed_types = ['text'] if key == 'key_delivery' else ['text', 'photo']
     
     await show_message_editor(
         callback.message, state,
@@ -472,8 +518,50 @@ async def edit_text_start(callback: CallbackQuery, state: FSMContext):
 
 
 # ============================================================================
-# РЕДАКТИРОВАНИЕ КНОПОК-ССЫЛОК
+# РЕДАКТИРОВАНИЕ КНОПОК-ССЫЛОК (НОВОСТИ, ПОДДЕРЖКА) в JSON страницы help
 # ============================================================================
+
+import json
+
+def _get_help_button(btn_id: str) -> dict:
+    from database.requests import get_page
+    row = get_page('help')
+    if not row:
+        return {}
+    buttons_json = row.get('buttons_custom') or row.get('buttons_default', '[]')
+    if not buttons_json:
+        buttons_json = '[]'
+    try:
+        buttons = json.loads(buttons_json)
+        for btn in buttons:
+            if btn.get('id') == btn_id:
+                return btn
+    except Exception:
+        pass
+    return {}
+
+def _update_help_button(btn_id: str, updates: dict) -> None:
+    from database.requests import get_page, update_page_custom
+    row = get_page('help')
+    if not row:
+        return
+    buttons_json = row.get('buttons_custom') or row.get('buttons_default', '[]')
+    if not buttons_json:
+        buttons_json = '[]'
+    try:
+        buttons = json.loads(buttons_json)
+        found = False
+        for btn in buttons:
+            if btn.get('id') == btn_id:
+                btn.update(updates)
+                found = True
+                break
+        if found:
+            update_page_custom('help', buttons=json.dumps(buttons, ensure_ascii=False))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error updating help button: {e}")
+
 
 @router.callback_query(F.data.startswith("edit_link:"))
 async def edit_link_menu(callback: CallbackQuery, state: FSMContext):
@@ -482,7 +570,6 @@ async def edit_link_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from database.requests import get_setting
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
     link_type = callback.data.split(":")[1]
@@ -491,14 +578,15 @@ async def edit_link_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Недопустимый параметр", show_alert=True)
         return
     
-    # Получаем текущие настройки
-    link_key = f"{link_type}_channel_link"
-    hidden_key = f"{link_type}_hidden"
-    name_key = f"{link_type}_button_name"
+    btn_id = f"btn_{link_type}"
+    btn_data = _get_help_button(btn_id)
     
-    current_url = get_setting(link_key, "Не задано")
-    is_hidden = get_setting(hidden_key, "0") == "1"
-    button_name = get_setting(name_key, "Новости" if link_type == "news" else "Поддержка")
+    current_url = btn_data.get('action_value', 'Не задано')
+    is_hidden = btn_data.get('is_hidden', False)
+    
+    # Label хранится с эмодзи '📢 ' или '💬 ', попробуем отрезать, если есть
+    raw_label = btn_data.get('label', 'Новости' if link_type == 'news' else 'Поддержка')
+    button_name = raw_label[2:] if raw_label.startswith('📢 ') or raw_label.startswith('💬 ') else raw_label
     
     # Названия для заголовка
     titles = {
@@ -544,7 +632,6 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from database.requests import get_setting
     from bot.keyboards.admin import cancel_kb
     
     link_type = callback.data.split(":")[1]
@@ -553,8 +640,9 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Недопустимый параметр", show_alert=True)
         return
     
-    link_key = f"{link_type}_channel_link"
-    current_url = get_setting(link_key, "Не задано")
+    btn_id = f"btn_{link_type}"
+    btn_data = _get_help_button(btn_id)
+    current_url = btn_data.get('action_value', 'Не задано')
     
     titles = {
         'news': 'Новости',
@@ -562,7 +650,7 @@ async def edit_link_url_start(callback: CallbackQuery, state: FSMContext):
     }
     
     await state.set_state(AdminStates.waiting_for_link_url)
-    await state.update_data(editing_key=link_key, return_to=f"edit_link:{link_type}", editing_message=callback.message)
+    await state.update_data(editing_btn_id=btn_id, return_to=f"edit_link:{link_type}", editing_message=callback.message)
     
     await safe_edit_or_send(callback.message, 
         f"🔗 <b>Изменение ссылки: {titles[link_type]}</b>\n\n"
@@ -579,16 +667,15 @@ async def edit_link_url_save(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    from database.requests import set_setting
     from bot.keyboards.admin import back_and_home_kb, cancel_kb
     from bot.utils.text import get_message_text_for_storage
     
     data = await state.get_data()
-    key = data.get('editing_key')
+    btn_id = data.get('editing_btn_id')
     return_to = data.get('return_to', 'admin_edit_texts')
     editing_message = data.get('editing_message')
     
-    if not key:
+    if not btn_id:
         await state.clear()
         await safe_edit_or_send(message, "❌ Ошибка состояния.", force_new=True)
         return
@@ -611,7 +698,7 @@ async def edit_link_url_save(message: Message, state: FSMContext):
     except Exception:
         pass
     
-    set_setting(key, new_value)
+    _update_help_button(btn_id, {'action_type': 'url', 'action_value': new_value})
     await state.clear()
     
     # Перерисовываем сообщение
@@ -642,18 +729,17 @@ async def toggle_link_hidden(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from database.requests import get_setting, set_setting
-    
     link_type = callback.data.split(":")[1]
     
     if link_type not in ('news', 'support'):
         await callback.answer("⛔ Недопустимый параметр", show_alert=True)
         return
     
-    hidden_key = f"{link_type}_hidden"
-    current = get_setting(hidden_key, "0")
-    new_value = "1" if current == "0" else "0"
-    set_setting(hidden_key, new_value)
+    btn_id = f"btn_{link_type}"
+    btn_data = _get_help_button(btn_id)
+    current_status = btn_data.get('is_hidden', False)
+    
+    _update_help_button(btn_id, {'is_hidden': not current_status})
     
     # Возвращаемся в меню редактирования ссылки
     await edit_link_menu(callback, state)
@@ -666,7 +752,6 @@ async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from database.requests import get_setting
     from bot.keyboards.admin import cancel_kb
     
     link_type = callback.data.split(":")[1]
@@ -675,8 +760,11 @@ async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Недопустимый параметр", show_alert=True)
         return
     
-    name_key = f"{link_type}_button_name"
-    current_name = get_setting(name_key, "Новости" if link_type == "news" else "Поддержка")
+    btn_id = f"btn_{link_type}"
+    btn_data = _get_help_button(btn_id)
+    
+    raw_label = btn_data.get('label', 'Новости' if link_type == 'news' else 'Поддержка')
+    current_name = raw_label[2:] if raw_label.startswith('📢 ') or raw_label.startswith('💬 ') else raw_label
     
     titles = {
         'news': 'Новости',
@@ -684,7 +772,7 @@ async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
     }
     
     await state.set_state(AdminStates.waiting_for_link_button_name)
-    await state.update_data(editing_name_key=name_key, link_type=link_type)
+    await state.update_data(editing_btn_id=btn_id, link_type=link_type)
     
     await safe_edit_or_send(callback.message, 
         f"✏️ <b>Изменение названия кнопки: {titles[link_type]}</b>\n\n"
@@ -698,14 +786,13 @@ async def edit_link_name_start(callback: CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_for_link_button_name)
 async def edit_link_name_save(message: Message, state: FSMContext):
     """Сохранение нового названия кнопки-ссылки."""
-    from database.requests import set_setting
     from bot.keyboards.admin import back_and_home_kb
     
     data = await state.get_data()
-    name_key = data.get('editing_name_key')
+    btn_id = data.get('editing_btn_id')
     link_type = data.get('link_type')
     
-    if not name_key:
+    if not btn_id:
         await state.clear()
         await safe_edit_or_send(message, "❌ Ошибка состояния.", force_new=True)
         return
@@ -722,7 +809,9 @@ async def edit_link_name_save(message: Message, state: FSMContext):
         )
         return
     
-    set_setting(name_key, new_name)
+    new_label = f"📢 {new_name}" if link_type == 'news' else f"💬 {new_name}"
+    _update_help_button(btn_id, {'label': new_label})
+    
     await state.clear()
     
     await safe_edit_or_send(message,

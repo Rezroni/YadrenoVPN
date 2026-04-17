@@ -13,3 +13,4 @@ from database.db_tariffs import *
 from database.db_stats import *
 from database.db_groups import *
 from database.db_settings import *
+from database.db_pages import *

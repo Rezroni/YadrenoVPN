@@ -62,6 +62,29 @@ async def on_startup(bot: Bot):
     bot_info = await bot.get_me()
     bot.my_username = bot_info.username
     logger.info(f"✅ Бот запущен: @{bot_info.username}")
+    
+    # Если обновления заблокированы — сразу уведомляем админов
+    from bot.utils.update_block import is_update_blocked, get_blocked_message
+    if is_update_blocked():
+        from config import ADMIN_IDS
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        
+        msg = get_blocked_message()
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="✅ OK", callback_data="dismiss_msg"))
+        kb = builder.as_markup()
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=msg,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить уведомление о блокировке админу {admin_id}: {e}")
 
 
 async def on_shutdown(bot: Bot):

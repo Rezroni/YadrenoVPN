@@ -45,7 +45,7 @@ async def show_referral_menu(callback: CallbackQuery, state: FSMContext):
     reward_type = get_referral_reward_type()
     levels = get_referral_levels()
     from bot.utils.message_editor import get_message_data
-    conditions_data = get_message_data('referral_conditions_text', '')
+    conditions_data = get_message_data('referral', '')
     conditions_text = conditions_data.get('text', '')
     
     status_emoji = "🟢" if enabled else "⚪"
@@ -297,11 +297,21 @@ async def referral_conditions_start(callback: CallbackQuery, state: FSMContext):
     
     from bot.handlers.admin.message_editor import show_message_editor
     
+    help_text = (
+        "📝 <b>Справка: Реферальная страница</b>\n\n"
+        "В тексте доступны плейсхолдеры, которые автоматически подставляются "
+        "при показе пользователю:\n\n"
+        "Переменные:\n"
+        "• <code>%ссылка%</code> — реферальная ссылка пользователя\n"
+        "• <code>%статистика%</code> — статистика по уровням и баланс"
+    )
+    
     await show_message_editor(
         callback.message, state,
-        key='referral_conditions_text',
+        key='referral',
         back_callback='admin_referral',
         allowed_types=['text', 'photo'],
+        help_text=help_text,
     )
     await callback.answer()
 

@@ -337,10 +337,53 @@ def get_previous_commits_info(limit: int = 5, revision: str = 'HEAD') -> str:
     return "Нет предыдущих коммитов"
 
 
+def install_requirements() -> Tuple[bool, str]:
+    """
+    Устанавливает/обновляет зависимости из requirements.txt.
+
+    Использует pip install --upgrade для корректной смены версий
+    пакетов и их зависимостей.
+
+    Returns:
+        (success, message) - результат установки
+    """
+    project_root = get_project_root()
+    requirements_path = os.path.join(project_root, 'requirements.txt')
+
+    if not os.path.exists(requirements_path):
+        logger.warning("requirements.txt не найден, пропускаем установку зависимостей")
+        return True, "requirements.txt не найден"
+
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '--upgrade', '-r', requirements_path],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            timeout=300
+        )
+
+        if result.returncode != 0:
+            error_output = result.stderr.strip() or result.stdout.strip()
+            logger.error(f"Ошибка установки зависимостей: {error_output}")
+            return False, f"❌ Ошибка установки зависимостей:\n{error_output}"
+
+        logger.info("✅ Зависимости успешно обновлены")
+        return True, "✅ Зависимости обновлены"
+
+    except subprocess.TimeoutExpired:
+        logger.error("Таймаут установки зависимостей (300 сек)")
+        return False, "❌ Превышено время ожидания установки зависимостей"
+    except Exception as e:
+        logger.error(f"Исключение при установке зависимостей: {e}")
+        return False, f"❌ Ошибка: {e}"
+
+
 def restart_bot() -> None:
     """
     Перезапускает бота, заменяя текущий процесс.
-    
+
     Использует os.execv для замены текущего процесса новым.
     """
     logger.info("🔄 Перезапуск бота...")

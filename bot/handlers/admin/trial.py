@@ -113,7 +113,7 @@ async def admin_trial_edit_text_start(callback: CallbackQuery, state: FSMContext
 
     await show_message_editor(
         callback.message, state,
-        key='trial_page_text',
+        key='trial',
         back_callback='admin_trial',
         allowed_types=['text', 'photo'],
     )

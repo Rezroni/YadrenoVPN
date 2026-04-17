@@ -24,20 +24,47 @@ logger = logging.getLogger(__name__)
 ALL_MEDIA_TYPES = ['text', 'photo', 'video', 'animation']
 
 
+# Ключи, которые хранятся в новой таблице pages
+PAGE_KEYS = (
+    'main',
+    'help',
+    'trial',
+    'prepayment',
+    'referral',
+    'key_delivery',
+)
+
+
 def get_message_data(key: str, default_text: str = '') -> dict:
     """
-    Загружает данные сообщения из settings.
+    Загружает данные сообщения.
     
-    Обратная совместимость: если в БД старая строка (не JSON),
-    возвращаем {'text': строка}.
+    Для ключей из PAGE_KEY_MAP — читает из таблицы pages.
+    Для остальных — из settings (обратная совместимость).
     
     Args:
-        key: Ключ настройки в таблице settings
+        key: Ключ настройки
         default_text: Текст по умолчанию если ключ не найден
         
     Returns:
         Словарь с ключами: text, photo_file_id, video_file_id, animation_file_id
     """
+    if key in PAGE_KEYS:
+        # Читаем из таблицы pages
+        from database.requests import get_page
+        row = get_page(key)
+        if row:
+            text = row.get('text_custom') or row.get('text_default') or default_text
+            image = row.get('image_custom') or row.get('image_default')
+            return {
+                'text': text,
+                'photo_file_id': image,
+                'video_file_id': None,
+                'animation_file_id': None,
+            }
+        return {'text': default_text}
+
+    # Старая логика: settings
     raw = get_setting(key)
     
     if raw is None:
@@ -57,7 +84,10 @@ def get_message_data(key: str, default_text: str = '') -> dict:
 
 def save_message_data(key: str, message: Message, allowed_types: Optional[List[str]] = None) -> dict:
     """
-    Извлекает данные из входящего Telegram-сообщения и сохраняет в settings как JSON.
+    Извлекает данные из входящего Telegram-сообщения и сохраняет.
+    
+    Для ключей из PAGE_KEY_MAP — сохраняет в таблицу pages (text_custom, image_custom).
+    Для остальных — в settings как JSON (обратная совместимость).
     
     Использует get_message_text_for_storage() для текста (правило ТЗ).
     Медиа не скачиваем — сохраняем только file_id.
@@ -93,9 +123,16 @@ def save_message_data(key: str, message: Message, allowed_types: Optional[List[s
     elif message.text:
         data['text'] = get_message_text_for_storage(message, 'html')
     
-    # Сохраняем как JSON
-    set_setting(key, json.dumps(data, ensure_ascii=False))
-    logger.info(f"Сообщение сохранено: {key}")
+    # Проверяем, относится ли ключ к таблице pages
+    if key in PAGE_KEYS:
+        # Сохраняем в таблицу pages
+        from database.requests import update_page_custom
+        update_page_custom(key, text=data['text'] or None, image=data['photo_file_id'])
+        logger.info(f"Сообщение сохранено в pages: {key}")
+    else:
+        # Старая логика: settings
+        set_setting(key, json.dumps(data, ensure_ascii=False))
+        logger.info(f"Сообщение сохранено в settings: {key}")
     
     return data
 

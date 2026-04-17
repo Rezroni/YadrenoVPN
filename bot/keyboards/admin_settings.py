@@ -86,7 +86,7 @@ def referral_main_kb(enabled: bool, reward_type: str, levels: List[Dict[str, Any
         is_enabled = level['enabled']
         status = '🟢' if is_enabled else '⚪'
         builder.row(InlineKeyboardButton(text=f'{status} Уровень {level_num}: {percent}%', callback_data=f'admin_referral_level:{level_num}'))
-    builder.row(InlineKeyboardButton(text='📝 Текст условий', callback_data='admin_referral_conditions'))
+    builder.row(InlineKeyboardButton(text='📝 Реферальная страница', callback_data='admin_referral_conditions'))
     builder.row(back_button('admin_panel'), home_button())
     return builder.as_markup()
 

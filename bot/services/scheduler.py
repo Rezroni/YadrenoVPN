@@ -29,6 +29,7 @@ from database.requests import (
 )
 from bot.services.vpn_api import get_client_from_server_data, VPNAPIError, format_traffic
 from bot.utils.git_utils import check_for_updates
+from bot.utils.update_block import is_update_blocked, get_blocked_message, try_unblock
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -521,6 +522,30 @@ async def check_and_notify_updates(bot: Bot) -> None:
     # Проверяем настроен ли GitHub URL
     if not GITHUB_REPO_URL:
         logger.warning("GitHub URL не настроен, пропускаем проверку обновлений")
+        return
+
+    # Проверяем условия разблокировки
+    try_unblock()
+
+    if is_update_blocked():
+        logger.info("🔒 Обновления заблокированы, отправляем уведомление")
+        msg = get_blocked_message()
+        # Кнопка OK для закрытия уведомления
+        from aiogram.types import InlineKeyboardButton
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="✅ OK", callback_data="dismiss_msg"))
+        kb = builder.as_markup()
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=msg,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить уведомление о блокировке админу {admin_id}: {e}")
         return
         
     try:

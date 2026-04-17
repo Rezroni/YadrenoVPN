@@ -28,7 +28,7 @@ def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
 
 
 # Текущая версия схемы БД
-LATEST_VERSION = 15
+LATEST_VERSION = 21
 
 
 def get_current_version() -> int:
@@ -122,8 +122,6 @@ def migration_1(conn: sqlite3.Connection) -> None:
             "Разработчик @plushkin\\_blog\n"
             "\\-\\-\\-"
         )),
-        ('news_channel_link', 'https://t.me/YadrenoRu'),
-        ('support_channel_link', 'https://t.me/YadrenoChat'),
     ]
     for key, value in default_settings:
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
@@ -1175,6 +1173,454 @@ def migration_15(conn: sqlite3.Connection) -> None:
     logger.info("Миграция v15 применена")
 
 
+def migration_16(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v16: Перенос курса USD/RUB из exchange_rates в settings.
+
+    Изменения:
+    - Курс USD_RUB перенесён в settings (ключ 'usd_rub_rate')
+    - Таблица exchange_rates удалена
+    """
+    logger.info("Применение миграции v16 (перенос курса в settings)...")
+
+    cursor = conn.execute("SELECT rate FROM exchange_rates WHERE currency_pair = 'USD_RUB'")
+    row = cursor.fetchone()
+    if row:
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ('usd_rub_rate', str(row['rate']))
+        )
+        logger.info(f"Курс USD_RUB перенесён в settings: {row['rate']}")
+    else:
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ('usd_rub_rate', '9500')
+        )
+        logger.info("Курс USD_RUB не найден, установлен дефолт: 9500")
+
+    conn.execute("DROP TABLE IF EXISTS exchange_rates")
+    logger.info("Таблица exchange_rates удалена")
+
+    logger.info("Миграция v16 применена")
+
+
+def migration_17(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v17: Флаг блокировки обновлений.
+
+    Изменения:
+    - Добавлена настройка update_blocked в settings ('0' по умолчанию)
+    """
+    logger.info("Применение миграции v17 (флаг блокировки обновлений)...")
+
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+        ('update_blocked', '0')
+    )
+
+    logger.info("Миграция v17 применена")
+
+
+def migration_18(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v18: Страницы пользователя в отдельных таблицах.
+
+    Изменения:
+    - Создана таблица pages (text_default, text_custom, image_default, image_custom, buttons_default)
+    - Создана таблица page_button_overrides (переопределения кнопок админом)
+    - Создана таблица page_button_additions (дополнительные кнопки админа)
+    - Данные из settings (main_page_text, help_page_text и т.д.) перенесены в pages
+    - text_default = дефолт разработчика, text_custom = значение из settings (если изменено)
+    """
+    import json as _json
+    logger.info("Применение миграции v18 (Страницы пользователя в БД)...")
+
+    # ── 1. Создание таблиц ─────────────────────────────────────────────────
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pages (
+            page_key         TEXT PRIMARY KEY,
+            text_default     TEXT NOT NULL DEFAULT '',
+            image_default    TEXT,
+            buttons_default  TEXT NOT NULL DEFAULT '[]',
+            text_custom      TEXT,
+            image_custom     TEXT,
+            updated_at       TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS page_button_overrides (
+            page_key    TEXT NOT NULL,
+            button_id   TEXT NOT NULL,
+            label       TEXT,
+            color       TEXT,
+            row         INTEGER,
+            col         INTEGER,
+            is_hidden   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (page_key, button_id)
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS page_button_additions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            page_key     TEXT NOT NULL,
+            label        TEXT NOT NULL,
+            color        TEXT NOT NULL DEFAULT 'secondary',
+            row          INTEGER NOT NULL DEFAULT 99,
+            col          INTEGER NOT NULL DEFAULT 0,
+            action_type  TEXT NOT NULL,
+            action_value TEXT NOT NULL,
+            sort_order   INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    logger.info("Таблицы pages, page_button_overrides, page_button_additions созданы")
+
+    # ── 2. Дефолтные тексты (HTML) ─────────────────────────────────────────
+
+    html_defaults = {
+        'main': (
+            "🔐 <b>Добро пожаловать в VPN-бот!</b>\n\n"
+            "Быстрый, безопасный и анонимный доступ к интернету.\n"
+            "Без логов, без ограничений, без проблем! 🚀\n\n"
+            "%тарифы%"
+        ),
+        'help': (
+            "🔐 Этот бот предоставляет доступ к VPN-сервису.\n\n"
+            "<b>Как это работает:</b>\n"
+            "1. Купите ключ через раздел «Купить ключ»\n\n"
+            "2. Установите VPN-клиент для вашего устройства:\n\n"
+            "Hiddify или v2rayNG или V2Box\n"
+            "Подробная инструкция по настройке VPN👇 https://telegra.ph/Kak-nastroit-VPN-Gajd-za-2-minuty-01-23\n\n"
+            "3. Импортируйте ключ в приложение\n\n"
+            "4. Подключайтесь и наслаждайтесь! 🚀\n\n"
+            "---\n"
+            "Разработчик @plushkin_blog\n"
+            "---"
+        ),
+        'trial': (
+            "🎁 <b>Пробная подписка</b>\n\n"
+            "Хотите попробовать наш VPN бесплатно?\n\n"
+            "Мы предлагаем пробный период, чтобы вы могли убедиться в качестве "
+            "и скорости нашего сервиса.\n\n"
+            "<b>Что входит в пробный доступ:</b>\n"
+            "• Полный доступ к VPN без ограничений по сайтам\n"
+            "• Высокая скорость соединения\n"
+            "• Несколько протоколов на выбор\n\n"
+            "Нажмите кнопку ниже, чтобы активировать пробный доступ прямо сейчас!\n\n"
+            "<i>Пробный период предоставляется один раз на аккаунт.</i>"
+        ),
+        'prepayment': (
+            "💳 <b>Купить ключ</b>\n\n"
+            "🔐 <b>Что вы получаете:</b>\n"
+            "• Доступ к нескольким серверам и протоколам\n"
+            "• 1 ключ = 1 устройство (одновременное подключение)\n"
+            "• Лимит трафика: до 1 ТБ в месяц (сброс каждые 30 дней)\n\n"
+            "⚠️ <b>Важно знать:</b>\n"
+            "• Средства не возвращаются — услуга считается оказанной в момент получения ключа\n"
+            "• Мы не даём никаких гарантий бесперебойной работы сервиса в будущем\n"
+            "• Мы не можем гарантировать, что данная технология останется рабочей\n\n"
+            "<i>Приобретая ключ, вы соглашаетесь с этими условиями.</i>"
+        ),
+        'referral': (
+            "👥 <b>Реферальная система</b>\n\n"
+            "📎 Ваша реферальная ссылка:\n"
+            "<code>%ссылка%</code>\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "📝 <b>Условия:</b>\n"
+            "Приглашённые пользователи регистрируются по вашей ссылке. "
+            "Когда они оплачивают подписку, вы получаете реферальное вознаграждение.\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "%статистика%"
+        ),
+        'key_delivery': (
+            "✅ <b>Ваш VPN-ключ!</b>\n\n"
+            "%ключ%\n"
+            "☝️ Нажмите, чтобы скопировать.\n\n"
+            "📱 <b>Инструкция:</b>\n"
+            "1. Скопируйте ссылку или отсканируйте QR-код.\n"
+            "2. Импортируйте в свой клиент. Какой именно клиент подходит, смотри в инструкции по кнопке ниже.\n"
+            "3. Нажмите подключиться!"
+        ),
+    }
+
+    # ── 3. Дефолтные кнопки (JSON) ─────────────────────────────────────────
+
+    buttons_defaults = {
+        'main': _json.dumps([
+            {"id": "btn_my_keys",  "label": "🔑 Мои ключи",         "color": "primary",   "row": 0, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_my_keys"},
+            {"id": "btn_buy_key",  "label": "💳 Купить ключ",        "color": "primary",   "row": 0, "col": 1, "is_hidden": False, "action_type": "internal", "action_value": "cmd_buy"},
+            {"id": "btn_trial",    "label": "🎁 Пробная подписка",   "color": "secondary", "row": 1, "col": 0, "is_hidden": True,  "action_type": "internal", "action_value": "cmd_trial"},
+            {"id": "btn_referral", "label": "🔗 Реферальная ссылка",  "color": "secondary", "row": 2, "col": 0, "is_hidden": True,  "action_type": "internal", "action_value": "cmd_referral"},
+            {"id": "btn_help",     "label": "❓ Справка",             "color": "secondary", "row": 2, "col": 1, "is_hidden": False, "action_type": "internal", "action_value": "cmd_help"},
+        ], ensure_ascii=False),
+
+        'help': _json.dumps([
+            {"id": "btn_news",      "label": "📢 Новости",    "color": "secondary", "row": 0, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_support",   "label": "💬 Поддержка",  "color": "secondary", "row": 0, "col": 1, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_back_main", "label": "🈴 На главную", "color": "secondary", "row": 1, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_back_main"},
+        ], ensure_ascii=False),
+
+        'trial': _json.dumps([
+            {"id": "btn_activate_trial", "label": "✅ Активировать",  "color": "primary",   "row": 0, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_activate_trial"},
+            {"id": "btn_back_main",      "label": "🈴 На главную",   "color": "secondary", "row": 1, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_back_main"},
+        ], ensure_ascii=False),
+
+        'prepayment': _json.dumps([
+            {"id": "btn_pay_crypto",  "label": "🪙 Оплатить USDT",          "color": "primary",   "row": 0, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_pay_stars",   "label": "⭐ Оплатить звёздами",      "color": "primary",   "row": 1, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_pay_cards",   "label": "💳 Оплатить картой",        "color": "primary",   "row": 2, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_pay_qr",      "label": "📱 QR-оплата (Карта/СБП)",  "color": "primary",   "row": 3, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_pay_demo",    "label": "🏦 Демо оплата (РФ карта)", "color": "primary",   "row": 4, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_pay_balance", "label": "💎 Использовать баланс",    "color": "primary",   "row": 5, "col": 0, "is_hidden": False, "action_type": "system", "action_value": None},
+            {"id": "btn_back_main",   "label": "🈴 На главную",             "color": "secondary", "row": 6, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_back_main"},
+        ], ensure_ascii=False),
+
+        'referral': _json.dumps([
+            {"id": "btn_back_main", "label": "🈴 На главную", "color": "secondary", "row": 0, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_back_main"},
+        ], ensure_ascii=False),
+
+        'key_delivery': _json.dumps([
+            {"id": "btn_help",      "label": "📄 Инструкция",  "color": "secondary", "row": 0, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_help"},
+            {"id": "btn_my_keys",   "label": "🔑 Мои ключи",  "color": "secondary", "row": 0, "col": 1, "is_hidden": False, "action_type": "internal", "action_value": "cmd_my_keys"},
+            {"id": "btn_back_main", "label": "🈴 На главную",  "color": "secondary", "row": 1, "col": 0, "is_hidden": False, "action_type": "internal", "action_value": "cmd_back_main"},
+        ], ensure_ascii=False),
+    }
+
+    # ── 4. Вставка дефолтов и перенос кастомных данных ──────────────────────
+
+    # Маппинг: page_key → ключ в settings
+    settings_map = {
+        'main':         'main_page_text',
+        'help':         'help_page_text',
+        'trial':        'trial_page_text',
+        'prepayment':   'prepayment_text',
+        'referral':     'referral_conditions_text',
+        'key_delivery': 'key_delivery_text',
+    }
+
+    # Дефолтные условия реферальной системы (из хендлера)
+    default_referral_conditions_days = (
+        "Приглашённые пользователи регистрируются по вашей ссылке. "
+        "Когда они оплачивают подписку, вы получаете процент от купленных дней. "
+        "Дни автоматически добавляются к вашему первому активному ключу."
+    )
+    default_referral_conditions_balance = (
+        "Приглашённые пользователи регистрируются по вашей ссылке. "
+        "Когда они оплачивают подписку, вы получаете процент от суммы оплаты на свой баланс. "
+        "Накопленными средствами можно оплачивать новые ключи или продлевать существующие."
+    )
+
+    for page_key in html_defaults:
+        text_default = html_defaults[page_key]
+        buttons_default = buttons_defaults[page_key]
+        settings_key = settings_map[page_key]
+
+        # Читаем текущее значение из settings
+        cursor = conn.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (settings_key,)
+        )
+        row = cursor.fetchone()
+
+        text_custom = None
+        image_custom = None
+
+        if row and row['value']:
+            raw_value = row['value']
+            current_text = None
+            current_photo = None
+
+            # Парсим JSON или plain string
+            try:
+                data = _json.loads(raw_value)
+                if isinstance(data, dict) and 'text' in data:
+                    current_text = data.get('text', '')
+                    current_photo = data.get('photo_file_id')
+                else:
+                    current_text = raw_value
+            except (_json.JSONDecodeError, TypeError):
+                current_text = raw_value
+
+            if current_photo:
+                image_custom = current_photo
+
+            if current_text and current_text.strip():
+                if page_key == 'referral':
+                    # Referral: current_text = только условия (не весь шаблон)
+                    # Проверяем: если совпадает с дефолтными условиями → не пишем custom
+                    ct = current_text.strip()
+                    if (ct == default_referral_conditions_days.strip() or
+                        ct == default_referral_conditions_balance.strip() or
+                        ct == 'Приглашённые пользователи регистрируются по вашей ссылке. '
+                             'Когда они оплачивают подписку, вы получаете реферальное вознаграждение.'):
+                        # Не менялись условия — text_custom = None
+                        pass
+                    else:
+                        # Условия были изменены админом — собираем полный шаблон
+                        text_custom = (
+                            "👥 <b>Реферальная система</b>\n\n"
+                            "📎 Ваша реферальная ссылка:\n"
+                            "<code>%ссылка%</code>\n\n"
+                            "━━━━━━━━━━━━━━━\n"
+                            "📝 <b>Условия:</b>\n"
+                            f"{current_text}\n\n"
+                            "━━━━━━━━━━━━━━━\n"
+                            "%статистика%"
+                        )
+                else:
+                    # Остальные страницы: сравниваем с дефолтом
+                    # Для main: дефолт без %тарифы% (в migration_15 его не было)
+                    compare_default = text_default
+                    if page_key == 'main':
+                        # Дефолт из migration_15 не содержал %тарифы%,
+                        # сравниваем с версией без %тарифы%
+                        compare_default = (
+                            "🔐 <b>Добро пожаловать в VPN-бот!</b>\n\n"
+                            "Быстрый, безопасный и анонимный доступ к интернету.\n"
+                            "Без логов, без ограничений, без проблем! 🚀"
+                        )
+
+                    if current_text.strip() == compare_default.strip():
+                        # Текст не изменён — text_custom = None
+                        pass
+                    else:
+                        text_custom = current_text
+                        # Для main: если в тексте нет %тарифы% — добавляем
+                        if page_key == 'main' and '%тарифы%' not in text_custom and '%без_тарифов%' not in text_custom:
+                            text_custom = f"{text_custom}\n\n%тарифы%"
+
+        # Вставляем в pages
+        conn.execute(
+            """
+            INSERT INTO pages (page_key, text_default, image_default, buttons_default, text_custom, image_custom)
+            VALUES (?, ?, NULL, ?, ?, ?)
+            """,
+            (page_key, text_default, buttons_default, text_custom, image_custom)
+        )
+        logger.info(f"Страница '{page_key}': default записан, custom={'ДА' if text_custom else 'НЕТ'}, фото={'ДА' if image_custom else 'НЕТ'}")
+
+    logger.info("Миграция v18 применена")
+
+
+def migration_19(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v19: Упрощение структуры кнопок страниц.
+
+    Изменения:
+    - Добавлено поле buttons_custom в таблицу pages (JSON, кастомизация админа)
+    - Удалены таблицы page_button_overrides и page_button_additions (лишние)
+    - Удалены старые ключи страниц из таблицы settings (перенесены в pages в v18)
+    """
+    logger.info("Применение миграции v19 (Упрощение кнопок страниц)...")
+
+    # 1. Добавляем поле buttons_custom в pages
+    _add_column(conn, 'pages', 'buttons_custom TEXT')
+
+    # 2. Удаляем лишние таблицы
+    conn.execute("DROP TABLE IF EXISTS page_button_overrides")
+    conn.execute("DROP TABLE IF EXISTS page_button_additions")
+    logger.info("Таблицы page_button_overrides и page_button_additions удалены")
+
+    # 3. Удаляем старые ключи из settings (данные уже в pages с v18)
+    conn.execute(
+        "DELETE FROM settings WHERE key IN "
+        "('main_page_text', 'help_page_text', 'trial_page_text', "
+        "'prepayment_text', 'referral_conditions_text', 'key_delivery_text')"
+    )
+    logger.info("Старые ключи страниц удалены из settings")
+
+    logger.info("Миграция v19 применена")
+
+
+def migration_20(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v20: Перенос настроек кнопок Новости и Поддержка в buttons_custom.
+    
+    Изменения:
+    - Читаются настройки из settings (news_channel_link, и т.д.)
+    - Кнопки btn_news и btn_support на странице help преобразуются из system в url
+    - Обновляется поле buttons_custom
+    """
+    import json as _json
+    logger.info("Применение миграции v20 (Перенос кнопок Новости и Поддержка в JSON)...")
+
+    # Читаем старые настройки из settings
+    cursor = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN "
+        "('news_channel_link', 'news_button_name', 'news_hidden', "
+        "'support_channel_link', 'support_button_name', 'support_hidden')"
+    )
+    raw_settings = {row[0]: row[1] for row in cursor.fetchall()}
+
+    news_link = raw_settings.get('news_channel_link', 'https://t.me/YadrenoRu')
+    if not news_link.startswith(('http://', 'https://')):
+        news_link = 'https://t.me/YadrenoRu'
+    news_name = raw_settings.get('news_button_name', 'Новости')
+    news_hidden = raw_settings.get('news_hidden', '0') == '1'
+
+    support_link = raw_settings.get('support_channel_link', 'https://t.me/YadrenoChat')
+    if not support_link.startswith(('http://', 'https://')):
+        support_link = 'https://t.me/YadrenoChat'
+    support_name = raw_settings.get('support_button_name', 'Поддержка')
+    support_hidden = raw_settings.get('support_hidden', '0') == '1'
+
+    # Получаем кнопки страницы help
+    row = conn.execute("SELECT buttons_custom, buttons_default FROM pages WHERE page_key = 'help'").fetchone()
+    if row:
+        buttons_json = row[0] if row[0] else row[1]
+        try:
+            buttons = _json.loads(buttons_json)
+            
+            needs_update = False
+            for btn in buttons:
+                if btn.get('id') == 'btn_news':
+                    btn['action_type'] = 'url'
+                    btn['action_value'] = news_link
+                    btn['label'] = f"📢 {news_name}"
+                    btn['is_hidden'] = news_hidden
+                    needs_update = True
+                elif btn.get('id') == 'btn_support':
+                    btn['action_type'] = 'url'
+                    btn['action_value'] = support_link
+                    btn['label'] = f"💬 {support_name}"
+                    btn['is_hidden'] = support_hidden
+                    needs_update = True
+            
+            if needs_update:
+                conn.execute(
+                    "UPDATE pages SET buttons_custom = ?, updated_at = CURRENT_TIMESTAMP WHERE page_key = 'help'",
+                    (_json.dumps(buttons, ensure_ascii=False),)
+                )
+                logger.info("Кнопки Новости и Поддержка сохранены в buttons_custom")
+        except (_json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Ошибка парсинга кнопок help: {e}")
+
+    logger.info("Миграция v20 применена")
+
+
+def migration_21(conn: sqlite3.Connection) -> None:
+    """
+    Миграция v21: Удаление рудиментарных настроек кнопок.
+    
+    Изменения:
+    - Удалены ключи настроек новостей и поддержки из таблицы settings,
+      так как они перенесены в JSON массив страницы help (v20).
+    """
+    logger.info("Применение миграции v21 (Удаление рудиментарных ключей кнопок)...")
+
+    conn.execute(
+        "DELETE FROM settings WHERE key IN "
+        "('news_channel_link', 'support_channel_link', "
+        "'news_button_name', 'support_button_name', "
+        "'news_hidden', 'support_hidden')"
+    )
+
+    logger.info("Миграция v21 применена: старые ключи удалены")
+
+
 MIGRATIONS = {
     1: migration_1,
     2: migration_2,
@@ -1191,6 +1637,12 @@ MIGRATIONS = {
     13: migration_13,
     14: migration_14,
     15: migration_15,
+    16: migration_16,
+    17: migration_17,
+    18: migration_18,
+    19: migration_19,
+    20: migration_20,
+    21: migration_21,
 }
 
 

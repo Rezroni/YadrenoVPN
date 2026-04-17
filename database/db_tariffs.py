@@ -18,8 +18,6 @@ __all__ = [
     'toggle_tariff_active',
     'get_tariffs_count',
     'get_admin_tariff',
-    'get_exchange_rate',
-    'update_exchange_rate',
 ]
 
 def get_all_tariffs(include_hidden: bool = False) -> List[Dict[str, Any]]:
@@ -253,42 +251,4 @@ def get_admin_tariff() -> Optional[Dict[str, Any]]:
             'is_active': 0
         }
 
-def get_exchange_rate(currency_pair: str) -> Optional[int]:
-    """
-    Получить курс из БД (fallback).
-    
-    Args:
-        currency_pair: Пара валют (например, 'USD_RUB')
-    
-    Returns:
-        Курс в копейках или None
-    """
-    with get_db() as conn:
-        cursor = conn.execute(
-            "SELECT rate FROM exchange_rates WHERE currency_pair = ?",
-            (currency_pair,)
-        )
-        row = cursor.fetchone()
-        return row['rate'] if row else None
 
-def update_exchange_rate(currency_pair: str, rate: int) -> bool:
-    """
-    Сохранить курс в БД.
-    
-    Args:
-        currency_pair: Пара валют (например, 'USD_RUB')
-        rate: Курс в копейках
-    
-    Returns:
-        True если успешно
-    """
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO exchange_rates (currency_pair, rate, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(currency_pair) DO UPDATE SET
-                rate = excluded.rate,
-                updated_at = CURRENT_TIMESTAMP
-        """, (currency_pair, rate))
-        logger.info(f"Курс {currency_pair} обновлён: {rate}")
-        return True
