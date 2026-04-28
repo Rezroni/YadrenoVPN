@@ -93,10 +93,25 @@ async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
-    
+
     await callback.answer()
     await state.set_state(AdminStates.admin_menu)
-    
+
+    # Снимаем застрявшую Reply-клавиатуру (например, после поиска пользователя)
+    import asyncio
+    from aiogram.types import ReplyKeyboardRemove
+    try:
+        temp_msg = await callback.message.answer("⏳", reply_markup=ReplyKeyboardRemove())
+        async def _delete_temp():
+            await asyncio.sleep(2.0)
+            try:
+                await temp_msg.delete()
+            except Exception:
+                pass
+        asyncio.create_task(_delete_temp())
+    except Exception:
+        pass
+
     text = await get_admin_stats_text()
     
     try:

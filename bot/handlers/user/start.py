@@ -119,21 +119,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     username = message.from_user.username
     logger.info(f'CMD_START: User {user_id} started bot')
     await state.clear()
-    
-    # Удаляем Reply-клавиатуру, если она "застряла" от предыдущих стейтов
-    from aiogram.types import ReplyKeyboardRemove
-    import asyncio
-    try:
-        temp_msg = await message.answer("⏳", reply_markup=ReplyKeyboardRemove())
-        async def _delete_temp():
-            await asyncio.sleep(2.0)
-            try:
-                await temp_msg.delete()
-            except Exception:
-                pass
-        asyncio.create_task(_delete_temp())
-    except Exception:
-        pass
 
     (user, is_new) = get_or_create_user(user_id, username)
     if user.get('is_banned'):

@@ -34,7 +34,7 @@ def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
 INITIAL_VERSION = 21
 
 # Текущая версия схемы БД (инкрементируется при добавлении новых миграций)
-LATEST_VERSION = 25
+LATEST_VERSION = 26
 
 
 def get_current_version() -> int:
@@ -144,6 +144,8 @@ def migration_initial(conn: sqlite3.Connection) -> None:
         ('referral_reward_type', 'days'),
         ('usd_rub_rate', '9500'),
         ('update_blocked', '0'),
+        ('daily_tasks_time', '03:00'),
+        ('update_check_time', '12:00'),
     ]
     for key, value in default_settings:
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
@@ -752,11 +754,21 @@ def migration_25(conn):
     logger.info("Миграция v25 применена: добавлен платёжный метод Cardlink (Карта/СБП)")
 
 
+def migration_26(conn):
+    """
+    Миграция v26: добавление настроек времени ежедневных задач и проверки обновлений.
+    """
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_tasks_time', '03:00')")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('update_check_time', '12:00')")
+    logger.info("Миграция v26 применена: добавлены настройки daily_tasks_time и update_check_time")
+
+
 MIGRATIONS = {
     22: migration_22,
     23: migration_23,
     24: migration_24,
     25: migration_25,
+    26: migration_26,
 }
 
 

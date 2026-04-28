@@ -19,7 +19,7 @@ from io import BytesIO
 from typing import Optional
 
 from aiogram import Bot
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, ReplyKeyboardRemove
 
 from config import ADMIN_IDS, GITHUB_REPO_URL
 from database.requests import (
@@ -154,12 +154,13 @@ async def send_daily_stats(bot: Bot) -> None:
                 await bot.send_message(
                     chat_id=admin_id,
                     text=report,
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=ReplyKeyboardRemove()
                 )
                 logger.info(f"Статистика отправлена админу {admin_id}")
             except Exception as e:
                 logger.warning(f"Не удалось отправить статистику админу {admin_id}: {e}")
-        
+
         logger.info("✅ Суточная статистика отправлена")
         
     except Exception as e:
@@ -341,7 +342,8 @@ async def send_backup_archive(bot: Bot) -> None:
                     chat_id=admin_id,
                     document=BufferedInputFile(archive_data, filename=filename),
                     caption=f"📦 <b>Ежедневный бэкап за {today}</b>\n\nСодержит базы данных бота и VPN-серверов.",
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=ReplyKeyboardRemove()
                 )
                 logger.info(f"Бэкап отправлен админу {admin_id}")
             except Exception as e:
@@ -471,9 +473,17 @@ async def run_daily_tasks(bot: Bot) -> None:
     
     while True:
         try:
-            # Ждём до 03:00
-            seconds_to_wait = get_seconds_until(3, 0)
-            logger.info(f"Следующий запуск задач через {seconds_to_wait // 3600}ч {(seconds_to_wait % 3600) // 60}м")
+            # Читаем время из настроек или используем по умолчанию 03:00
+            time_str = get_setting('daily_tasks_time', '03:00')
+            try:
+                target_hour, target_minute = map(int, time_str.split(':'))
+            except Exception as e:
+                logger.error(f"Некорректный формат настройки daily_tasks_time '{time_str}': {e}. Используем 03:00")
+                target_hour, target_minute = 3, 0
+
+            # Ждём до заданного времени
+            seconds_to_wait = get_seconds_until(target_hour, target_minute)
+            logger.info(f"Следующий запуск задач ({time_str}) через {seconds_to_wait // 3600}ч {(seconds_to_wait % 3600) // 60}м")
             
             await asyncio.sleep(seconds_to_wait)
             
@@ -610,9 +620,17 @@ async def run_update_check_scheduler(bot: Bot) -> None:
     
     while True:
         try:
-            # Ждём до 12:00
-            seconds_to_wait = get_seconds_until(12, 0)
-            logger.info(f"Следующая проверка обновлений через {seconds_to_wait // 3600}ч {(seconds_to_wait % 3600) // 60}м")
+            # Читаем время из настроек или используем по умолчанию 12:00
+            time_str = get_setting('update_check_time', '12:00')
+            try:
+                target_hour, target_minute = map(int, time_str.split(':'))
+            except Exception as e:
+                logger.error(f"Некорректный формат настройки update_check_time '{time_str}': {e}. Используем 12:00")
+                target_hour, target_minute = 12, 0
+
+            # Ждём до заданного времени
+            seconds_to_wait = get_seconds_until(target_hour, target_minute)
+            logger.info(f"Следующая проверка обновлений ({time_str}) через {seconds_to_wait // 3600}ч {(seconds_to_wait % 3600) // 60}м")
             
             await asyncio.sleep(seconds_to_wait)
             
@@ -786,7 +804,12 @@ async def monthly_traffic_reset(bot: Bot) -> None:
     report = "\n".join(report_parts)
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(chat_id=admin_id, text=report, parse_mode="HTML")
+            await bot.send_message(
+                chat_id=admin_id,
+                text=report,
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardRemove()
+            )
         except Exception as e:
             logger.warning(f"Не удалось отправить отчёт админу {admin_id}: {e}")
 

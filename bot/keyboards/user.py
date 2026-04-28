@@ -151,31 +151,31 @@ def buy_key_kb(
     if cards_enabled:
         cb_data = f"pay_cards:{order_id}" if order_id else "pay_cards"
         builder.row(
-            InlineKeyboardButton(text="💳 Оплатить картой", callback_data=cb_data)
+            InlineKeyboardButton(text="💳 TG payments", callback_data=cb_data)
         )
 
     # QR ЮКасса — переход к выбору тарифа
     if yookassa_qr_enabled:
         builder.row(
-            InlineKeyboardButton(text="📱 QR-оплата (Карта/СБП)", callback_data="pay_qr")
+            InlineKeyboardButton(text="📱 ЮКасса (QR/СБП)", callback_data="pay_qr")
         )
 
     # WATA — переход к выбору тарифа
     if wata_enabled:
         builder.row(
-            InlineKeyboardButton(text="🌊 Оплата WATA (Карта/СБП)", callback_data="pay_wata")
+            InlineKeyboardButton(text="🌊 WATA (Карта/СБП)", callback_data="pay_wata")
         )
 
     # Platega — переход к выбору тарифа
     if platega_enabled:
         builder.row(
-            InlineKeyboardButton(text="💸 Оплата Platega (СБП)", callback_data="pay_platega")
+            InlineKeyboardButton(text="💸 Platega (СБП)", callback_data="pay_platega")
         )
 
     # Cardlink — переход к выбору тарифа
     if cardlink_enabled:
         builder.row(
-            InlineKeyboardButton(text="🔗 Оплата Cardlink (Карта/СБП)", callback_data="pay_cardlink")
+            InlineKeyboardButton(text="🔗 Cardlink (Карта/СБП)", callback_data="pay_cardlink")
         )
 
     # Демо оплата (РФ) — переход к выбору тарифа
@@ -690,7 +690,7 @@ def renew_payment_method_kb(
     if cards_enabled:
         builder.row(
             InlineKeyboardButton(
-                text="💳 Оплатить картой",
+                text="💳 TG payments",
                 callback_data=f"renew_cards_tariff:{key_id}"
             )
         )
@@ -699,7 +699,7 @@ def renew_payment_method_kb(
     if yookassa_qr_enabled:
         builder.row(
             InlineKeyboardButton(
-                text="📱 QR-оплата (Карта/СБП)",
+                text="📱 ЮКасса (QR/СБП)",
                 callback_data=f"renew_qr_tariff:{key_id}"
             )
         )
@@ -708,7 +708,7 @@ def renew_payment_method_kb(
     if wata_enabled:
         builder.row(
             InlineKeyboardButton(
-                text="🌊 Оплата WATA (Карта/СБП)",
+                text="🌊 WATA (Карта/СБП)",
                 callback_data=f"renew_wata_tariff:{key_id}"
             )
         )
@@ -717,7 +717,7 @@ def renew_payment_method_kb(
     if platega_enabled:
         builder.row(
             InlineKeyboardButton(
-                text="💸 Оплата Platega (СБП)",
+                text="💸 Platega (СБП)",
                 callback_data=f"renew_platega_tariff:{key_id}"
             )
         )
@@ -726,7 +726,7 @@ def renew_payment_method_kb(
     if cardlink_enabled:
         builder.row(
             InlineKeyboardButton(
-                text="🔗 Оплата Cardlink (Карта/СБП)",
+                text="🔗 Cardlink (Карта/СБП)",
                 callback_data=f"renew_cardlink_tariff:{key_id}"
             )
         )

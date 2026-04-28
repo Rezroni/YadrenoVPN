@@ -128,30 +128,30 @@ async def show_payments_menu(callback: CallbackQuery, state: FSMContext):
         text += "⚪ <b>Крипто (@Ya_SellerBot)</b>\n"
 
     if cards:
-        text += "🟢 <b>Оплата картами (ЮКасса Telegram Payments)</b>\n"
+        text += "🟢 <b>TG payments (ЮКасса Telegram Payments)</b>\n"
     else:
-        text += "⚪ <b>Оплата картами (ЮКасса Telegram Payments)</b>\n"
+        text += "⚪ <b>TG payments (ЮКасса Telegram Payments)</b>\n"
 
     if qr:
         shop_id = get_setting('yookassa_shop_id', '')
-        text += f"🟢 <b>QR-оплата (ЮКасса прямая/СБП)</b> | Shop ID: <code>{shop_id or '—'}</code>\n"
+        text += f"🟢 <b>ЮКасса (прямая/СБП)</b> | Shop ID: <code>{shop_id or '—'}</code>\n"
     else:
-        text += "⚪ <b>QR-оплата (ЮКасса прямая/СБП)</b>\n"
+        text += "⚪ <b>ЮКасса (прямая/СБП)</b>\n"
 
     if wata:
-        text += "🟢 <b>Оплата WATA (Карта/СБП)</b>\n"
+        text += "🟢 <b>WATA (Карта/СБП)</b>\n"
     else:
-        text += "⚪ <b>Оплата WATA (Карта/СБП)</b>\n"
+        text += "⚪ <b>WATA (Карта/СБП)</b>\n"
 
     if platega:
-        text += "🟢 <b>Оплата Platega (СБП)</b>\n"
+        text += "🟢 <b>Platega (СБП)</b>\n"
     else:
-        text += "⚪ <b>Оплата Platega (СБП)</b>\n"
+        text += "⚪ <b>Platega (СБП)</b>\n"
 
     if cardlink:
-        text += "🟢 <b>Оплата Cardlink (Карта/СБП)</b> 🌟 <b>Рекомендованный</b>\n"
+        text += "🟢 <b>Cardlink (Карта/СБП)</b> 🌟 <b>Рекомендованный</b>\n"
     else:
-        text += "⚪ <b>Оплата Cardlink (Карта/СБП)</b> 🌟 <b>Рекомендованный</b>\n"
+        text += "⚪ <b>Cardlink (Карта/СБП)</b> 🌟 <b>Рекомендованный</b>\n"
 
     if demo:
         text += "🟢 <b>Демо оплата (РФ)</b>\n"
@@ -1531,10 +1531,8 @@ async def show_cardlink_management_menu(callback: CallbackQuery, state: FSMConte
         "с обратным переходом в бота после оплаты и автоматической проверкой платежа.\n\n"
         "📋 <b>Как получить доступ:</b>\n"
         "1. Зарегистрируйтесь на <a href=\"https://cardlink.link/\">cardlink.link</a>.\n"
-        "2. При регистрации укажите промокод — получите скидку:\n"
-        "<code>YadrenoVPN</code>\n"
-        "3. После одобрения скопируйте <b>Shop ID</b> и <b>API-токен</b> из ЛК.\n"
-        "4. Укажите их в кнопках ниже.\n\n"
+        "2. После одобрения скопируйте <b>Shop ID</b> и <b>API-токен</b> из ЛК.\n"
+        "3. Укажите их в кнопках ниже.\n\n"
         "🔁 <b>Возвратные ссылки</b> (указывайте в настройках магазина Cardlink):\n"
         f"• Успех — <code>https://t.me/{bot_username}?start=cl_Success</code>\n"
         f"• Ошибка — <code>https://t.me/{bot_username}?start=cl_Fail</code>\n"

@@ -25,15 +25,15 @@ def payments_menu_kb(stars_enabled: bool, crypto_enabled: bool, cards_enabled: b
     crypto_status = '✅' if crypto_enabled else '❌'
     builder.row(InlineKeyboardButton(text=f'💰 Крипто-платежи: {crypto_status}', callback_data='admin_payments_toggle_crypto'))
     cards_status = '✅' if cards_enabled else '❌'
-    builder.row(InlineKeyboardButton(text=f'💳 Оплата картами (ЮКасса): {cards_status}', callback_data='admin_payments_cards'))
+    builder.row(InlineKeyboardButton(text=f'📱 TG payments (ЮКасса): {cards_status}', callback_data='admin_payments_cards'))
     qr_status = '✅' if qr_enabled else '❌'
-    builder.row(InlineKeyboardButton(text=f'📱 QR-оплата (ЮКасса/СБП): {qr_status}', callback_data='admin_payments_qr'))
+    builder.row(InlineKeyboardButton(text=f'💳 ЮКасса (QR/СБП): {qr_status}', callback_data='admin_payments_qr'))
     wata_status = '✅' if wata_enabled else '❌'
-    builder.row(InlineKeyboardButton(text=f'🌊 Оплата WATA (Карта/СБП): {wata_status}', callback_data='admin_payments_wata'))
+    builder.row(InlineKeyboardButton(text=f'🌊 WATA (Карта/СБП): {wata_status}', callback_data='admin_payments_wata'))
     platega_status = '✅' if platega_enabled else '❌'
-    builder.row(InlineKeyboardButton(text=f'💸 Оплата Platega (СБП): {platega_status}', callback_data='admin_payments_platega'))
+    builder.row(InlineKeyboardButton(text=f'💸 Platega (СБП): {platega_status}', callback_data='admin_payments_platega'))
     cardlink_status = '✅' if cardlink_enabled else '❌'
-    builder.row(InlineKeyboardButton(text=f'🔗 Оплата Cardlink (Карта/СБП) 🌟 Рекомендованный: {cardlink_status}', callback_data='admin_payments_cardlink'))
+    builder.row(InlineKeyboardButton(text=f'🔗 Cardlink (Карта/СБП) 🌟 Рекомендованный: {cardlink_status}', callback_data='admin_payments_cardlink'))
     demo_status = '✅' if demo_enabled else '❌'
     builder.row(InlineKeyboardButton(text=f'💳 Демо оплата (РФ): {demo_status}', callback_data='admin_payments_toggle_demo'))
     reset_status = '✅' if monthly_reset_enabled else '❌'
